@@ -1,6 +1,13 @@
 var app = app || {};
 
-app.index = {
+/**
+ * Class for handling index page functionality
+ */
+class Index {
+    /**
+     * Process and display weather data
+     * @returns {Promise<void>}
+     */
     async processWeather() {
         const weatherDataContainer = document.getElementById('weather-data');
         const lastUpdatedElement = document.getElementById('last-updated');
@@ -110,7 +117,7 @@ app.index = {
                             <div class="card-header text-center fw-bold">
                                 ${item.title}
                             </div>
-                        
+
                             <div class="card-body text-center d-flex flex-column justify-content-between"
                                 ${item.background ?
                         item.backgroundType === 'image'
@@ -119,11 +126,11 @@ app.index = {
                                 ? `style="background-color: ${item.background};"`
                                 : ''
                         : ''}>
-                        
+
                                 <div class="flex-grow-1 d-flex justify-content-center align-items-start">
                                     <span class="material-symbols-outlined weather-icon" style="${item.style ?? ''}">${item.icon}</span>
                                 </div>
-                        
+
                                 <div class="mt-auto">
                                     <h2 class="card-text text-regular">${item.value}</h2>
                                     ${item.summary ? `<div class="card-subtext text-muted small">${item.summary}</div>` : ''}
@@ -157,4 +164,7 @@ app.index = {
             `;
         }
     }
-};
+}
+
+// Initialize the index instance
+app.index = new Index();

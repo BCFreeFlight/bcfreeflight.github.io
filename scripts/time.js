@@ -1,5 +1,6 @@
 var app = app || {};
-app.time = {
+
+class Time {
     timeAgo(date) {
         const seconds = Math.floor((new Date() - date) / 1000);
 
@@ -22,7 +23,7 @@ app.time = {
         }
 
         return 'just now';
-    },
+    }
 
     format(date) {
         return date.toLocaleTimeString([], {
@@ -37,3 +38,6 @@ app.time = {
         );
     }
 }
+
+// Initialize the time instance
+app.time = new Time();
