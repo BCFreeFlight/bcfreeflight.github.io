@@ -1,6 +1,7 @@
-var app = app || {};
-
-class Time {
+/**
+ * Class for handling time formatting
+ */
+export class Time {
     timeAgo(date) {
         const seconds = Math.floor((new Date() - date) / 1000);
 
@@ -39,5 +40,6 @@ class Time {
     }
 }
 
-// Initialize the time instance
-app.time = new Time();
+// Export a default instance of the Time class
+const time = new Time();
+export default time;

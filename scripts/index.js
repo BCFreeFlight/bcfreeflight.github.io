@@ -1,9 +1,10 @@
-var app = app || {};
+import time from './time.js';
+import weather from './weather.js';
 
 /**
  * Class for handling index page functionality
  */
-class Index {
+export class Index {
     /**
      * Process and display weather data
      * @returns {Promise<void>}
@@ -15,12 +16,12 @@ class Index {
         try {
             const launchLocation = 'ILUMBY7';
             const groundLocation = 'ILUMBY2';
-            const weatherData = await app.weather.loadWeatherData(launchLocation, groundLocation);
+            const weatherData = await weather.loadWeatherData(launchLocation, groundLocation);
 
             // Update last updated time
             const lastUpdated = new Date(weatherData.observation.obsTimeUtc);
 
-            lastUpdatedElement.textContent = `Last updated: ${app.time.format(lastUpdated)}`;
+            lastUpdatedElement.textContent = `Last updated: ${time.format(lastUpdated)}`;
             locationElement.textContent = `Location: ${weatherData.observation.lat.toFixed(3)}, ${weatherData.observation.lon.toFixed(3)} at ${weatherData.observation.uk_hybrid.elev} ft`;
             // Clear loading indicator
             weatherDataContainer.innerHTML = '';
@@ -30,7 +31,7 @@ class Index {
                 const weatherItems = [
                     {
                         title: 'Wind Direction',
-                        value: `${app.weather.degreesToDirection(weatherData.observation.winddir)}`,
+                        value: `${weather.degreesToDirection(weatherData.observation.winddir)}`,
                         icon: 'navigation',
                         style: `transform: rotate(${weatherData.observation.winddir + 180}deg);`,
                         background: `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/${weatherData.observation.lon},${weatherData.observation.lat},14/600x400?access_token=pk.eyJ1IjoiY2hhc2VmbG9yZWxsIiwiYSI6ImNtYmN4bXJnNzEza2cyam42MWNwNmJ5cmIifQ.40BZbxanvherUlpc4RdoFw`,
@@ -166,5 +167,6 @@ class Index {
     }
 }
 
-// Initialize the index instance
-app.index = new Index();
+// Export a default instance of the Index class
+const index = new Index();
+export default index;

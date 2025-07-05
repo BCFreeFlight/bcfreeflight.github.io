@@ -1,9 +1,7 @@
-var app = app || {};
-
 /**
  * Class for handling Weather Underground API interactions
  */
-class WeatherUnderground {
+export class WeatherUnderground {
     /**
      * Retrieves weather data for the specified location, with optional caching support.
      *
@@ -106,7 +104,7 @@ class WeatherUnderground {
 /**
  * Main Weather class for handling weather data and calculations
  */
-class Weather {
+export class Weather {
     constructor() {
         // Initialize the WeatherUnderground instance
         this.weatherUnderground = new WeatherUnderground();
@@ -320,5 +318,6 @@ class Weather {
     }
 }
 
-// Initialize the weather instance
-app.weather = new Weather();
+// Export a default instance of the Weather class
+const weather = new Weather();
+export default weather;
