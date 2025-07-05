@@ -19,17 +19,8 @@
                 width="100%"
                 height="100%">
         </iframe>
-        <!--
-        <iframe id="video-player"
-                src="https://player.twitch.tv/?channel=bcfreeflight&parent=bcfreeflight.github.io&parent=bcfreeflight.com&parent=localhost&autoplay=true&muted=true"
-                height="100%"
-                width="100%"
-                allowfullscreen>
-        </iframe>
-        -->
     </div>
 </div>
-
 
 <div id="weather-overlay">
     <div class="weather-item" id="wind-direction">
@@ -68,9 +59,30 @@
         await loadAndDisplayWeatherOverlay();
         // Set up an automatic refresh every 5 minutes
         setInterval(loadAndDisplayWeatherOverlay, 5 * 60 * 1000);
-        // refresh the whole page every 6 hours just in case something got balled up
-        setTimeout(() => location.reload(), 6 * 60 * 60 * 1000);
+        // Refresh every hour (3_600_000 milliseconds)
+        setInterval(refreshIframe, 60 * 60 * 1000);
+        // Refresh the whole page every 8 hours just in case something got balled up.
+        // This can also help purge old scripts and ensure the stream is always up to date.
+        setTimeout(() => {
+            // Appends a cache-busting query param to ensure a fresh fetch
+            window.location.href = window.location.pathname + '?cb=' + Date.now();
+        }, 8 * 60 * 60 * 1000);
     });
+
+    // Refresh when page becomes active (e.g., tab is focused)
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+            refreshIframe();
+        }
+    });
+
+
+    function refreshIframe() {
+        const iframe = document.getElementById("video-player");
+        const src = iframe.src;
+        iframe.src = "";
+        setTimeout(() => iframe.src = src, 100); // slight delay ensures reload
+    }
 
     async function loadAndDisplayWeatherOverlay() {
         try {
