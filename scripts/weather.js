@@ -218,7 +218,7 @@ export class Weather {
             barometricPressure = {
                 description: this.barometricPressureSummaries.find(s => seaLevelPressure <= s.max).description,
                 kPa: (observation.uk_hybrid.pressure / 10).toFixed(1),
-                hPa: observation.uk_hybrid.pressure.toFixed(1)
+                hPa: observation.uk_hybrid.pressure? observation.uk_hybrid.pressure.toFixed(1):'n/a'
             };
 
             dewPoint = {
