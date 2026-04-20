@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BC Free Flight</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0"/>
+    <style>
+        :root {
+            --background-color: #ffffff;
+            --text-color: #212529;
+            --muted-text-color: #6c757d;
+            --card-background: #f8f9fa;
+            --card-border: #dee2e6;
+        }
+
+        body {
+            background-color: var(--background-color);
+            color: var(--text-color);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        main {
+            flex: 1;
+        }
+
+        .hero {
+            padding: 5rem 1rem 3rem;
+            text-align: center;
+        }
+
+        .hero-icon {
+            font-size: 4rem;
+            color: var(--text-color);
+            display: block;
+            margin-bottom: 1rem;
+        }
+
+        .site-card {
+            background-color: var(--card-background);
+            border: 1px solid var(--card-border);
+            border-radius: 0.75rem;
+            padding: 2rem 1.5rem;
+            text-decoration: none;
+            color: var(--text-color);
+            display: block;
+            transition: transform 0.25s ease, box-shadow 0.25s ease;
+        }
+
+        .site-card:hover {
+            transform: translateY(-6px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+            color: var(--text-color);
+        }
+
+        .site-card .card-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            display: block;
+        }
+
+        .site-card h2 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .site-card p {
+            font-size: 0.9rem;
+            color: var(--muted-text-color);
+            margin-bottom: 0;
+        }
+
+        footer {
+            padding: 2rem 1rem;
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--muted-text-color);
+            border-top: 1px solid var(--card-border);
+        }
+
+        footer a {
+            color: var(--muted-text-color);
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+
+<main>
+    <div class="hero">
+        <span class="material-symbols-outlined hero-icon">paragliding</span>
+        <h1 class="display-4 fw-bold">BC Free Flight</h1>
+        <p class="lead text-muted">Real-time weather and live video for Cooper's Launch, British Columbia</p>
+    </div>
+
+    <div class="container pb-5">
+        <div class="row g-4 justify-content-center">
+            <div class="col-12 col-sm-6 col-lg-4">
+                <a href="/sites/coopers" class="site-card">
+                    <span class="material-symbols-outlined card-icon">partly_cloudy_day</span>
+                    <h2>Weather</h2>
+                    <p>Live wind speed, direction, gusts, rainfall, and lapse rate for Cooper's Launch.</p>
+                </a>
+            </div>
+            <div class="col-12 col-sm-6 col-lg-4">
+                <a href="/sites/coopers/live" class="site-card">
+                    <span class="material-symbols-outlined card-icon">videocam</span>
+                    <h2>Live Feed</h2>
+                    <p>Full-screen live video stream of the launch with weather data overlay.</p>
+                </a>
+            </div>
+        </div>
+    </div>
+</main>
+
+<footer>
+    <p class="mb-1">Cooper's Launch &mdash; British Columbia, Canada</p>
+    <p class="mb-0">
+        <a href="/policy.html">Privacy Policy</a>
+        &nbsp;&middot;&nbsp;
+        <a href="/tos.html">Terms of Service</a>
+    </p>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
