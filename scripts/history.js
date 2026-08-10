@@ -77,7 +77,9 @@ export const SERIES = [
         key: 'windDir',
         label: 'Wind direction',
         unit: 'º',
-        colour: '#2f5fa8',
+        // Slate rather than another blue: wind speed is already blue, and in
+        // the overlay the two were near enough to be taken for one line.
+        colour: '#4b5563',
         group: 'direction',
         on: true,
         // A compass wraps, so 359º to 1º is one degree of change and a line
