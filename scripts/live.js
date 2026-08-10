@@ -2,31 +2,24 @@ import weather from './weather.js';
 import sites from './sites.js';
 import youtube from './youtube.js';
 import * as readings from './readings.js';
-
-// How long to wait before trying again when a read fails outright.
-const RETRY_MS = 60 * 1000;
-
-// The player settings this page has always used: muted autoplay, no chrome.
-const PLAYER_PARAMS = {
-    autoplay: 1,
-    mute: 1,
-    controls: 0,
-    rel: 0,
-    showinfo: 0,
-    loop: 1,
-    modestbranding: 1,
-    iv_load_policy: 3,
-    disablekb: 1
-};
-
-// Remembered across the page's own periodic reloads.
-const VIEW_KEY = 'live_view_mode';
-const WEATHER_KEY = 'live_weather_visible';
+import {
+    PAGE_RELOAD_MS,
+    PLAYER_PARAMS,
+    RETRY_MS,
+    STORAGE_KEYS,
+    STREAM_RELOAD_MS
+} from './config/defaults.js';
+import {readText, writeText} from './lib/storage.js';
+import {Loop} from './lib/loop.js';
 
 /**
  * Class for handling live page functionality
  */
 export class Live {
+    constructor() {
+        this.overlay = new Loop(() => this.loadAndDisplayWeatherOverlay());
+    }
+
     /**
      * Initialize the live page
      * @returns {Promise<void>}
@@ -40,14 +33,16 @@ export class Live {
         // for: the shortest station cache timeout, so each station comes back
         // exactly as often as its own setting allows.
         await this.loadAndDisplayWeatherOverlay();
-        // Refresh every hour (3_600_000 milliseconds)
-        setInterval(() => this.refreshIframe(), 60 * 60 * 1000);
-        // Refresh the whole page every 8 hours just in case something got balled up.
-        // This can also help purge old scripts and ensure the stream is always up to date.
+
+        setInterval(() => this.refreshIframe(), STREAM_RELOAD_MS);
+
+        // Reload the whole page occasionally, in case something got balled up.
+        // This also purges old scripts and keeps a screen nobody navigates on
+        // the current build.
         setTimeout(() => {
             // Appends a cache-busting query param to ensure a fresh fetch
             window.location.href = window.location.pathname + '?cb=' + Date.now();
-        }, 8 * 60 * 60 * 1000);
+        }, PAGE_RELOAD_MS);
 
         // Refresh when page becomes active (e.g., tab is focused)
         document.addEventListener("visibilitychange", () => {
@@ -81,34 +76,6 @@ export class Live {
             frame.src = src;
         } catch (error) {
             console.error('Could not configure the live player:', error);
-        }
-    }
-
-    /**
-     * Reads a remembered preference, tolerating a blocked or full localStorage.
-     * @param {string} key - Storage key
-     * @param {string} fallback - Value to use when nothing is stored
-     * @returns {string} The stored value, or the fallback
-     */
-    readPreference(key, fallback) {
-        try {
-            return localStorage.getItem(key) ?? fallback;
-        } catch (error) {
-            return fallback;
-        }
-    }
-
-    /**
-     * Stores a preference, ignoring failures so a private-mode browser still works.
-     * @param {string} key - Storage key
-     * @param {string} value - Value to store
-     * @returns {void}
-     */
-    writePreference(key, value) {
-        try {
-            localStorage.setItem(key, value);
-        } catch (error) {
-            // A preference that cannot be saved is not worth interrupting playback for.
         }
     }
 
@@ -153,18 +120,18 @@ export class Live {
 
         // Whole frame by default: arriving on a cropped view hides part of the
         // sky, and the button is there for anyone who wants to fill the screen.
-        applyView(this.readPreference(VIEW_KEY, 'fit'));
-        applyWeather(this.readPreference(WEATHER_KEY, 'shown') === 'shown');
+        applyView(readText(STORAGE_KEYS.liveView, 'fit'));
+        applyWeather(readText(STORAGE_KEYS.liveWeather, 'shown') === 'shown');
 
         viewButton.addEventListener('click', () => {
             const mode = document.body.dataset.view === 'fill' ? 'fit' : 'fill';
-            this.writePreference(VIEW_KEY, mode);
+            writeText(STORAGE_KEYS.liveView, mode);
             applyView(mode);
         });
 
         weatherButton.addEventListener('click', () => {
             const visible = document.body.dataset.weather !== 'shown';
-            this.writePreference(WEATHER_KEY, visible ? 'shown' : 'hidden');
+            writeText(STORAGE_KEYS.liveWeather, visible ? 'shown' : 'hidden');
             applyWeather(visible);
         });
 
@@ -327,11 +294,7 @@ export class Live {
         } finally {
             // Queue the next read whether or not this one worked, so a blip
             // never ends the loop on a display nobody is watching.
-            clearTimeout(this.overlayTimer);
-            this.overlayTimer = setTimeout(
-                () => this.loadAndDisplayWeatherOverlay(),
-                site ? sites.refreshMs(site.stations) : RETRY_MS
-            );
+            this.overlay.in(site ? sites.refreshMs(site.stations) : RETRY_MS);
         }
     }
 

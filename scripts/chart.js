@@ -1,4 +1,5 @@
-import {SERIES} from './history.js';
+import {SERIES} from './config/series.js';
+import {nearestIndex} from './lib/series-time.js';
 
 /**
  * The day's readings, drawn.
@@ -38,6 +39,13 @@ const HOVER_TOLERANCE = 15 * 60 * 1000;
 
 // The compass, down the right of the wind direction panel.
 const COMPASS = [[0, 'N'], [90, 'E'], [180, 'S'], [270, 'W'], [360, 'N']];
+
+// Headroom above a panel carrying the row of wind arrows.
+const ARROW_BAND = 24;
+
+// Roughly how far apart the arrows sit. Any closer and they overlap; any
+// further and the sweep of a veering wind stops being visible.
+const ARROW_SPACING = 42;
 
 /**
  * Round numbers for an axis, chosen from the data's own range.
@@ -255,14 +263,21 @@ export class Chart {
             ...this.scaleFor(series.filter(item => item.unit === unit))
         }));
 
+        // Direction is hard to read off a wrapping axis, and impossible to read
+        // off one shared with four other measurements. The arrows say it
+        // outright, so they come along whenever direction is being shown.
+        const arrows = series.some(item => item.key === 'windDir');
+        const top = PAD.top + (arrows ? ARROW_BAND : 0);
+
         return [{
             left: PAD.left,
             right: width - right,
-            top: PAD.top,
-            bottom: PAD.top + COMBINED_HEIGHT,
+            top,
+            bottom: top + COMBINED_HEIGHT,
             series,
             axes,
             relative,
+            arrows,
             legend: series.length > 1
         }];
     }
@@ -289,9 +304,15 @@ export class Chart {
             }
         });
 
-        return groups.map((group, index) => {
-            const top = PAD.top + index * (PANEL_HEIGHT + PANEL_GAP);
+        // Stacked down the page rather than placed by index, because the wind
+        // direction panel claims a band above itself for its arrows and every
+        // panel below it has to move down by the same amount.
+        let cursor = PAD.top;
+
+        return groups.map(group => {
             const compass = group.series.some(item => item.key === 'windDir');
+            const top = cursor + (compass ? ARROW_BAND : 0);
+            cursor = top + PANEL_HEIGHT + PANEL_GAP;
 
             return {
                 left: PAD.left,
@@ -303,6 +324,7 @@ export class Chart {
                 axes: [{unit: group.series[0].unit, side: 'left', ...this.scaleFor(group.series)}],
                 relative: false,
                 compass,
+                arrows: compass,
                 legend: true
             };
         });
@@ -457,9 +479,69 @@ export class Chart {
             ${axisLabels}
             ${units}
             ${compass}
+            ${plot.arrows ? this.renderArrows(plot) : ''}
             ${plot.series.map(series => this.renderSeries(series, plot)).join('')}
             ${plot.legend ? this.renderLegend(plot) : ''}
         </g>`;
+    }
+
+    /**
+     * A row of arrows above the plot, each pointing the way the wind was going.
+     *
+     * Dots on a 0–360 axis say where the wind was, but reading them means
+     * converting a number back into a direction, and the wrap at north makes a
+     * steady wind look like it is swinging. An arrow needs no conversion: a
+     * whole afternoon of veering reads at a glance.
+     *
+     * They are sampled evenly across the day rather than drawn per reading —
+     * one per reading would be a smear — and each takes the reading nearest its
+     * own slot, so a gap in the log leaves a gap in the row.
+     *
+     * The glyph is the one the wind tiles use, turned the same way: the reading
+     * names the direction the wind blows *from*, so the arrow points 180
+     * degrees away from it.
+     *
+     * @param {Object} plot - The plot being drawn
+     * @returns {string} SVG markup
+     */
+    renderArrows(plot) {
+        const column = this.day.values.windDir;
+        if (!column) return '';
+
+        const colour = this.catalogue.find(series => series.key === 'windDir')?.colour ?? 'currentColor';
+        const count = Math.max(2, Math.floor((plot.right - plot.left) / ARROW_SPACING));
+        const span = this.day.dayEnd - this.day.dayStart;
+        const slot = span / count;
+        const y = plot.top - ARROW_BAND / 2;
+
+        let marks = '';
+
+        for (let i = 0; i < count; i++) {
+            // The middle of this slot, so the row sits inside the plot rather
+            // than hanging an arrow off each end.
+            const time = this.day.dayStart + (i + 0.5) * slot;
+            const index = nearestIndex(this.day.times, time);
+
+            if (index === -1) continue;
+
+            // Nothing logged anywhere near this slot: leave it empty rather
+            // than reaching across the gap for a direction from hours away.
+            if (Math.abs(this.day.times[index] - time) > slot / 2) continue;
+
+            const degrees = column[index];
+            if (degrees === null) continue;
+
+            const x = plot.left + ((time - this.day.dayStart) / span) * (plot.right - plot.left);
+            const at = `${x.toFixed(1)} ${y.toFixed(1)}`;
+
+            marks += `<text class="chart-arrow" x="${x.toFixed(1)}" y="${y.toFixed(1)}"
+                            text-anchor="middle" dominant-baseline="central" fill="${colour}"
+                            transform="rotate(${(degrees + 180).toFixed(1)} ${at})">navigation</text>`;
+        }
+
+        // Decorative: every one of these is a reading already plotted below,
+        // and a screen reader announcing twenty arrow glyphs helps nobody.
+        return `<g class="chart-arrows" aria-hidden="true">${marks}</g>`;
     }
 
     /**
@@ -617,7 +699,7 @@ export class Chart {
 
             const span = this.day.dayEnd - this.day.dayStart;
             const time = this.day.dayStart + ((x - plot.left) / (plot.right - plot.left)) * span;
-            const index = this.nearest(time);
+            const index = nearestIndex(this.day.times, time);
 
             // Past the last reading of the day there is nothing to report.
             if (index === -1 || Math.abs(this.day.times[index] - time) > HOVER_TOLERANCE) {
@@ -630,23 +712,6 @@ export class Chart {
         this.host.addEventListener('pointermove', move);
         this.host.addEventListener('pointerdown', move);
         this.host.addEventListener('pointerleave', () => this.hideReadout());
-    }
-
-    /**
-     * The reading closest to a moment.
-     * @param {number} time - Milliseconds
-     * @returns {number} Its index, or -1 when the day is empty
-     */
-    nearest(time) {
-        const times = this.day.times;
-        if (!times.length) return -1;
-
-        let best = 0;
-        for (let i = 1; i < times.length; i++) {
-            if (Math.abs(times[i] - time) < Math.abs(times[best] - time)) best = i;
-        }
-
-        return best;
     }
 
     /**

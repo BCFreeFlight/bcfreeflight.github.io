@@ -1,14 +1,10 @@
+/* The reset, the typeface and the utilities are in base.css. */
+
 body, html {
-    margin: 0;
     padding: 0;
     height: 100%;
     overflow: hidden;
     background-color: black;
-    /* Same face as the weather page. Without this the overlay fell back to the
-       browser default, which is a serif. */
-    font-family: "Archivo", system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-    font-variant-numeric: tabular-nums;
-    -webkit-font-smoothing: antialiased;
 }
 
 /* Dynamic viewport height, so a collapsing mobile URL bar does not leave a
@@ -250,15 +246,6 @@ body[data-weather="hidden"] #weather-dock {
     white-space: nowrap;
 }
 
-.visually-hidden {
-    position: absolute;
-    width: 1px; height: 1px;
-    margin: -1px; padding: 0;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-}
-
 /* Portrait: keep all four tiles on one row, just smaller, so the video keeps
    as much height as possible. */
 @media (orientation: portrait) {
@@ -383,8 +370,4 @@ body[data-weather="hidden"] #weather-dock {
     .lapse-leg { font-size: .58rem; }
 
     .control .material-symbols-outlined { font-size: 18px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    #weather-dock { transition: none; }
 }

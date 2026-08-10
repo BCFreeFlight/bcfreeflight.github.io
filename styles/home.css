@@ -1,0 +1,166 @@
+/* ==========================================================================
+   Front page
+
+   A signpost, not a dashboard: the readings are one click away and this page
+   exists only to point at them. Same tokens and same card shape as the weather
+   page, so arriving there is not a change of scenery.
+   ========================================================================== */
+
+:root {
+    --page: #ffffff;
+    --surface: #f8f9fa;
+    --ink: #16202b;
+    --ink-muted: #5b6672;
+    --rule: #dee2e6;
+    --accent: #1668b0;
+
+    --gutter: clamp(1rem, 4vw, 2.5rem);
+    --max: 1080px;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    background: var(--page);
+    color: var(--ink);
+    font-size: 17px;
+    line-height: 1.5;
+}
+
+main { flex: 1 1 auto; }
+
+a { color: var(--accent); }
+
+:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* --- Hero ----------------------------------------------------------------- */
+
+.hero {
+    max-width: var(--max);
+    margin: 0 auto;
+    padding: clamp(3rem, 9vw, 5rem) var(--gutter) clamp(1.5rem, 5vw, 3rem);
+    text-align: center;
+}
+
+.hero-icon {
+    display: block;
+    margin: 0 auto 1rem;
+    font-size: 4rem;
+    line-height: 1;
+    color: var(--ink);
+}
+
+.hero h1 {
+    margin: 0;
+    font-size: clamp(2rem, 6vw, 3.25rem);
+    font-weight: 700;
+    line-height: 1.05;
+    letter-spacing: -.02em;
+}
+
+.hero p {
+    margin: .75rem 0 0;
+    font-size: clamp(1rem, 2.5vw, 1.15rem);
+    color: var(--ink-muted);
+}
+
+/* --- Sites ---------------------------------------------------------------- */
+
+#sites {
+    max-width: var(--max);
+    margin: 0 auto;
+    padding: 0 var(--gutter) clamp(2rem, 6vw, 4rem);
+}
+
+.site + .site { margin-top: 2.5rem; }
+
+/* One site needs no heading to tell it apart from the others; more than one
+   does. Hidden rather than dropped, so the cards stay in a labelled group for
+   anyone reading the page aloud. */
+.site-name {
+    margin: 0 0 1rem;
+    font-size: 1.125rem;
+    font-weight: 700;
+    letter-spacing: .02em;
+}
+
+#sites .site:only-child .site-name {
+    position: absolute;
+    width: 1px; height: 1px;
+    margin: -1px; padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+.cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+}
+
+.card {
+    display: block;
+    padding: 2rem 1.5rem;
+    border: 1px solid var(--rule);
+    border-radius: .75rem;
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+}
+
+.card:hover {
+    transform: translateY(-6px);
+    border-color: var(--accent);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .08);
+}
+
+.card-icon {
+    display: block;
+    margin-bottom: 1rem;
+    font-size: 3rem;
+    line-height: 1;
+}
+
+.card-title {
+    margin: 0 0 .5rem;
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.card-text {
+    margin: 0;
+    font-size: .9375rem;
+    color: var(--ink-muted);
+}
+
+.empty {
+    margin: 0;
+    padding: 2rem 0;
+    text-align: center;
+    color: var(--ink-muted);
+}
+
+/* --- Footer --------------------------------------------------------------- */
+
+footer {
+    padding: 2rem var(--gutter);
+    border-top: 1px solid var(--rule);
+    text-align: center;
+    font-size: .8rem;
+    color: var(--ink-muted);
+}
+
+footer p { margin: 0 0 .25rem; }
+
+footer p:last-child { margin-bottom: 0; }
+
+footer a { color: var(--ink-muted); text-decoration: none; }
+
+footer a:hover { text-decoration: underline; }

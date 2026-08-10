@@ -1,3 +1,5 @@
+import {LIVE_PROBE_TIMEOUT_MS} from './config/defaults.js';
+
 /**
  * YouTube embedding and live status.
  *
@@ -7,9 +9,6 @@
  */
 
 const IFRAME_API = 'https://www.youtube.com/iframe_api';
-
-// The probe reports within about half a second; this is only a backstop.
-const PROBE_TIMEOUT_MS = 12000;
 
 export class YouTube {
     constructor() {
@@ -142,7 +141,7 @@ export class YouTube {
             const timer = setTimeout(() => {
                 // Nothing ever claimed to be live, so treat it as off air.
                 finish(false);
-            }, PROBE_TIMEOUT_MS);
+            }, LIVE_PROBE_TIMEOUT_MS);
 
             player = new YT.Player(frame, {
                 events: {

@@ -1,0 +1,158 @@
+/**
+ * Runs the test page in headless Chrome and reports what it found.
+ *
+ * Chrome's own `--dump-dom` prints the page at the load event, which is before
+ * any of these tests have run, so the browser is driven over the DevTools
+ * protocol instead: wait for `window.__tests`, read the totals, print the
+ * failures, exit with the truth. Node has both `fetch` and `WebSocket` built
+ * in, so this still installs nothing.
+ *
+ * Not usually run directly — `tests/run.sh` starts the server and calls it.
+ */
+
+import {spawn} from 'node:child_process';
+import {mkdtempSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+
+const url = process.argv[2];
+const chrome = process.argv[3];
+const deadline = Number(process.env.TEST_TIMEOUT_MS ?? 60000);
+
+if (!url || !chrome) {
+    console.error('usage: headless.mjs <url> <chrome>');
+    process.exit(2);
+}
+
+const port = 9222 + (process.pid % 500);
+const profile = mkdtempSync(join(tmpdir(), 'bcff-tests-'));
+
+const browser = spawn(chrome, [
+    '--headless',
+    '--disable-gpu',
+    // Both of these are for containers: a build agent has no sandbox to speak
+    // of and a small /dev/shm that Chrome will otherwise run out of.
+    '--no-sandbox',
+    '--disable-dev-shm-usage',
+    '--no-first-run',
+    '--disable-extensions',
+    `--user-data-dir=${profile}`,
+    `--remote-debugging-port=${port}`,
+    url
+], {stdio: 'ignore'});
+
+/**
+ * @param {number} ms - How long to wait
+ * @returns {Promise<void>}
+ */
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Cleans up whatever is still running and ends the process.
+ * @param {number} code - Exit status
+ * @returns {void}
+ */
+function finish(code) {
+    browser.kill();
+    try {
+        rmSync(profile, {recursive: true, force: true});
+    } catch (error) {
+        // A profile directory that will not delete is not worth failing over.
+    }
+    process.exit(code);
+}
+
+/**
+ * The page target, once Chrome is listening.
+ * @returns {Promise<Object>} The target description
+ */
+async function target() {
+    for (let attempt = 0; attempt < 100; attempt++) {
+        try {
+            const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+            const page = targets.find(entry => entry.type === 'page' && entry.webSocketDebuggerUrl);
+            if (page) return page;
+        } catch (error) {
+            // Chrome is not up yet.
+        }
+
+        await wait(100);
+    }
+
+    throw new Error('Chrome never started listening');
+}
+
+const page = await target();
+const socket = new WebSocket(page.webSocketDebuggerUrl);
+
+await new Promise((resolve, reject) => {
+    socket.addEventListener('open', resolve, {once: true});
+    socket.addEventListener('error', () => reject(new Error('Could not attach to Chrome')), {once: true});
+});
+
+let nextId = 0;
+const pending = new Map();
+
+socket.addEventListener('message', event => {
+    const message = JSON.parse(event.data);
+    const settle = pending.get(message.id);
+    if (!settle) return;
+
+    pending.delete(message.id);
+    settle(message);
+});
+
+/**
+ * Evaluates an expression in the page.
+ * @param {string} expression - JavaScript to run
+ * @returns {Promise<*>} Whatever it evaluated to
+ */
+function evaluate(expression) {
+    const id = ++nextId;
+
+    return new Promise((resolve, reject) => {
+        pending.set(id, message => {
+            if (message.error) return reject(new Error(message.error.message));
+            if (message.result?.exceptionDetails) {
+                return reject(new Error(message.result.exceptionDetails.text));
+            }
+            resolve(message.result?.result?.value);
+        });
+
+        socket.send(JSON.stringify({
+            id,
+            method: 'Runtime.evaluate',
+            params: {expression, returnByValue: true, awaitPromise: true}
+        }));
+    });
+}
+
+const started = Date.now();
+let totals = null;
+
+while (Date.now() - started < deadline) {
+    try {
+        totals = await evaluate('window.__tests ? JSON.stringify(window.__tests) : null');
+    } catch (error) {
+        // The page may still be loading its modules.
+    }
+
+    if (totals) break;
+    await wait(200);
+}
+
+if (!totals) {
+    console.error(`No results after ${deadline}ms. Open ${url} in a browser to see why.`);
+    finish(1);
+}
+
+const {passed, failed, failures} = JSON.parse(totals);
+
+failures.forEach(failure => {
+    console.log(`FAILED ${failure.suite} — ${failure.test}`);
+    console.log(String(failure.error).split('\n').map(line => `        ${line}`).join('\n'));
+});
+
+console.log(`TESTS ${failed === 0 ? 'PASS' : 'FAIL'} ${passed}/${passed + failed}`);
+
+finish(failed === 0 ? 0 : 1);
