@@ -299,10 +299,10 @@ export class Index {
                                 data-view="${entry.station.key}" tabindex="-1"
                                 ${entry.online ? '' : 'disabled'}>
                             <span class="tab-name">${entry.station.name}</span>
-                            <span class="tab-meta">${entry.station.id}${
+                            <span class="tab-meta">${
                                 entry.online
-                                    ? ` &middot; ${Number(entry.observation.uk_hybrid.elev).toLocaleString()} ft`
-                                    : ' &middot; offline'
+                                    ? `${Number(entry.observation.uk_hybrid.elev).toLocaleString()} ft ASL`
+                                    : 'offline'
                             }</span>
                         </button>`).join('')}
                 </div>
@@ -312,15 +312,13 @@ export class Index {
     }
 
     /**
-     * Shows one station's panel and updates the masthead to match it.
+     * Shows one station's panel. The masthead is deliberately left alone: it
+     * describes the site, not whichever tab happens to be open.
      * @param {string} key - The view key to activate
-     * @param {Object} lookup - View key to its observation and station id
+     * @param {Object} lookup - View key to its station entry
      * @returns {void}
      */
     activateView(key, lookup) {
-        const lastUpdatedElement = document.getElementById('last-updated');
-        const locationElement = document.getElementById('location');
-
         document.querySelectorAll('.tab').forEach(tab => {
             const selected = tab.dataset.view === key;
             tab.setAttribute('aria-selected', String(selected));
@@ -330,13 +328,37 @@ export class Index {
         document.querySelectorAll('.view').forEach(panel => {
             panel.hidden = panel.dataset.view !== key;
         });
+    }
 
-        const active = lookup[key];
-        const uk = active.observation.uk_hybrid ?? {};
-        lastUpdatedElement.textContent = time.format(new Date(active.observation.obsTimeUtc));
+    /**
+     * Writes the site's own coordinates and observation time into the masthead.
+     *
+     * These come from the station marked default in the configuration and stay
+     * put while tabs are switched, so the heading keeps describing the site
+     * rather than following the reader around. If that station is dark, the
+     * first one still reporting stands in rather than leaving a blank heading.
+     *
+     * @param {Object[]} loaded - Station entries from Weather.loadStations
+     * @returns {void}
+     */
+    renderMasthead(loaded) {
+        const lastUpdatedElement = document.getElementById('last-updated');
+        const locationElement = document.getElementById('location');
+
+        const source = loaded.find(entry => entry.station.isDefault && entry.online)
+            ?? loaded.find(entry => entry.online);
+
+        if (!source) {
+            lastUpdatedElement.textContent = 'no signal';
+            locationElement.textContent = '';
+            return;
+        }
+
+        const uk = source.observation.uk_hybrid ?? {};
+        lastUpdatedElement.textContent = time.format(new Date(source.observation.obsTimeUtc));
         locationElement.innerHTML =
-            `${active.observation.lat.toFixed(3)}, ${active.observation.lon.toFixed(3)}<span class="sep">/</span>` +
-            `${Number(uk.elev).toLocaleString()} ft<span class="sep">/</span>${active.station.id}`;
+            `${source.observation.lat.toFixed(3)}, ${source.observation.lon.toFixed(3)}` +
+            `<span class="sep">@</span>${Number(uk.elev).toLocaleString()} ft ASL`;
     }
 
     /**
@@ -517,6 +539,8 @@ export class Index {
                 notice +
                 this.renderTabs(loaded) +
                 enabled.map(entry => this.renderStationView(entry)).join('');
+
+            this.renderMasthead(loaded);
 
             const lookup = Object.fromEntries(enabled.map(entry => [entry.station.key, entry]));
             this.bindTabs(enabled, lookup, selected);
