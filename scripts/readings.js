@@ -64,6 +64,7 @@ export function wind(observation) {
     const cardinal = known ? weather.degreesToDirection(degrees) : NO_READING;
     const speed = format(uk.windSpeed);
     const gust = format(uk.windGust);
+    const gusting = gust !== NO_READING && speed !== NO_READING && Number(gust) > Number(speed);
 
     return {
         cardinal,
@@ -72,9 +73,12 @@ export function wind(observation) {
         rotation: known ? degrees + 180 : 0,
         speed,
         gust,
-        gusting: gust !== NO_READING && speed !== NO_READING && Number(gust) > Number(speed),
+        gusting,
         summary: `${cardinal} ${speed} km/h`,
-        gustSummary: `Wind (gust ${gust} km/h)`
+        // The same wording the weather page uses under its wind figure. When
+        // there is nothing gusting there is nothing to report, so the line goes
+        // back to naming the reading above it.
+        gustSummary: gusting ? `Gusting to ${gust} km/h` : 'Wind'
     };
 }
 
