@@ -47,22 +47,27 @@ export class Live {
     async loadAndDisplayWeatherOverlay() {
         try {
             const launchLocation = 'ILUMBY7';
-            const groundLocation = 'ILUMBY2';
+            const groundLocation = 'ILUMBY8';
             const weatherData = await weather.loadWeatherData(launchLocation, groundLocation, 60 * 10);
 
             if (weatherData && weatherData.observation) {
                 const observation = weatherData.observation;
 
-                // Update the wind direction
-                const windDirectionElement = document.querySelector('#wind-direction .weather-value');
-                windDirectionElement.textContent = `${weather.degreesToDirection(observation.winddir)}`;
+                // Update wind: direction and speed read as one value, gust in the title
+                const windElement = document.querySelector('#wind .weather-value');
+                windElement.textContent =
+                    `${weather.degreesToDirection(observation.winddir)} ${observation.uk_hybrid.windSpeed} km/h`;
 
-                const windIconElement = document.querySelector('#wind-direction .weather-icon');
+                // The wind blows *from* the cardinal shown, so the arrow points 180° away from it
+                const windIconElement = document.querySelector('#wind .weather-icon');
                 windIconElement.style = `transform: rotate(${observation.winddir + 180}deg);`;
 
-                // Update wind speed/gust
-                const windSpeedElement = document.querySelector('#wind-speed .weather-value');
-                windSpeedElement.textContent = `${observation.uk_hybrid.windSpeed} km/h (${observation.uk_hybrid.windGust} km/h)`;
+                const windTitleElement = document.querySelector('#wind .weather-title');
+                windTitleElement.textContent = `Wind (gust ${observation.uk_hybrid.windGust} km/h)`;
+
+                // Update temperature at launch
+                const temperatureElement = document.querySelector('#temperature .weather-value');
+                temperatureElement.textContent = `${observation.uk_hybrid.temp} ºC`;
 
                 // Update rainfall
                 const rainfallElement = document.querySelector('#rainfall .weather-value');
