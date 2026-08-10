@@ -1,6 +1,20 @@
 import weather from './weather.js';
 import sites from './sites.js';
+import youtube from './youtube.js';
 import * as readings from './readings.js';
+
+// The player settings this page has always used: muted autoplay, no chrome.
+const PLAYER_PARAMS = {
+    autoplay: 1,
+    mute: 1,
+    controls: 0,
+    rel: 0,
+    showinfo: 0,
+    loop: 1,
+    modestbranding: 1,
+    iv_load_policy: 3,
+    disablekb: 1
+};
 
 // Remembered across the page's own periodic reloads.
 const VIEW_KEY = 'live_view_mode';
@@ -17,6 +31,7 @@ export class Live {
     async initialize() {
         this.setupViewControls();
         this.setupDragToPan();
+        await this.setupPlayer();
 
         // Initial data load
         await this.loadAndDisplayWeatherOverlay();
@@ -37,6 +52,33 @@ export class Live {
                 this.refreshIframe();
             }
         });
+    }
+
+    /**
+     * Points the player at the camera named in the site configuration, so the
+     * channel lives in sites.json rather than in this page's markup.
+     * @returns {Promise<void>}
+     */
+    async setupPlayer() {
+        const frame = document.getElementById('video-player');
+        if (!frame) return;
+
+        try {
+            const site = await sites.site(sites.slugFromPage());
+            const camera = sites.withCamera(site.stations);
+            const src = camera && youtube.embedUrl(camera.youtube, PLAYER_PARAMS);
+
+            if (!src) {
+                console.error('No camera configured for this site');
+                return;
+            }
+
+            document.title = `${site.name} Live Stream`;
+            frame.title = `${site.name} live stream`;
+            frame.src = src;
+        } catch (error) {
+            console.error('Could not configure the live player:', error);
+        }
     }
 
     /**

@@ -7,7 +7,11 @@
           "default": true,
           "name": "Launch",
           "wunderground": "ILUMBY7",
-          "cacheSeconds": 60
+          "cacheSeconds": 60,
+          "youtube": {
+            "channel": "UCQt2u6plzHb6gyfrnCprwGA",
+            "video": "nr7lhTb72cI"
+          }
         },
         {
           "name": "Landing Zone",

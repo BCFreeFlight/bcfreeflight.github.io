@@ -1,6 +1,7 @@
 import time from './time.js';
 import weather from './weather.js';
 import sites from './sites.js';
+import youtube from './youtube.js';
 import * as readings from './readings.js';
 
 // Top of the wind bar, in km/h. Anything faster pins the bar full.
@@ -357,6 +358,44 @@ export class Index {
     }
 
     /**
+     * Points the camera link at the live page while the stream is up, and turns
+     * it into a plain "Offline" marker when it is not.
+     *
+     * The check runs after the weather has rendered, so a slow or unreachable
+     * YouTube never holds up the readings.
+     *
+     * @param {Object} site - The resolved site
+     * @returns {Promise<void>}
+     */
+    async updateCameraLink(site) {
+        const link = document.getElementById('live-link');
+        if (!link) return;
+
+        const camera = sites.withCamera(site.stations);
+
+        if (!camera) {
+            link.hidden = true;
+            return;
+        }
+
+        try {
+            const live = await youtube.isLive(camera.youtube);
+            if (live) return;
+        } catch (error) {
+            // Leave the link alone: an unreachable API is not proof of an
+            // off-air camera, and a working link beats a wrong "Offline".
+            console.error('Could not determine live status:', error);
+            return;
+        }
+
+        link.classList.add('is-offline');
+        link.removeAttribute('href');
+        link.setAttribute('aria-disabled', 'true');
+        link.innerHTML = 'Camera offline';
+        link.title = 'The camera is not broadcasting right now';
+    }
+
+    /**
      * Process and display weather data
      * @returns {Promise<void>}
      */
@@ -401,6 +440,9 @@ export class Index {
 
             const lookup = Object.fromEntries(enabled.map(entry => [entry.station.key, entry]));
             this.bindTabs(enabled, lookup);
+
+            // Deliberately not awaited: the readings are already on screen.
+            this.updateCameraLink(site);
 
         } catch (error) {
             console.error("Error in weather app:", error);

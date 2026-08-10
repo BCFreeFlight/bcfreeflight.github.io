@@ -148,6 +148,20 @@ a { color: var(--blue); }
 
 .live-link:hover { border-color: var(--magenta); color: var(--magenta); transform: translateY(-1px); }
 
+/* Off air: no dot, no pulse, nothing to click. */
+.live-link.is-offline {
+    color: var(--ink-faint);
+    border-color: var(--rule);
+    background: transparent;
+    cursor: default;
+}
+
+.live-link.is-offline:hover {
+    border-color: var(--rule);
+    color: var(--ink-faint);
+    transform: none;
+}
+
 .live-dot {
     width: .5rem;
     height: .5rem;

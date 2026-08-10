@@ -72,6 +72,7 @@ export class Sites {
         const isDefault = station.default === true;
 
         return {
+            youtube: this.youtube(station.youtube),
             // Stable enough to use in element ids and to key state by.
             key: station.wunderground.toLowerCase(),
             name: station.name ?? station.wunderground,
@@ -81,6 +82,39 @@ export class Sites {
             cacheSeconds: station.cacheSeconds
                 ?? (isDefault ? DEFAULT_CACHE_SECONDS : REFERENCE_CACHE_SECONDS)
         };
+    }
+
+    /**
+     * Normalises a station's YouTube source.
+     *
+     * A bare string is taken as a video id. A channel is worth stating as well,
+     * because `live_stream?channel=` follows whatever that channel is
+     * broadcasting now, where a video id names one broadcast and goes stale the
+     * next time the stream restarts.
+     *
+     * @param {?(string|Object)} youtube - The configured value, if any
+     * @returns {?Object} {channel, video}, or null when nothing is configured
+     */
+    youtube(youtube) {
+        if (!youtube) return null;
+
+        if (typeof youtube === 'string') {
+            return {channel: null, video: youtube};
+        }
+
+        return {
+            channel: youtube.channel ?? null,
+            video: youtube.video ?? null
+        };
+    }
+
+    /**
+     * The first station of a site that carries a camera.
+     * @param {Object[]} stations - Normalised stations
+     * @returns {?Object} The station, or null when the site has no camera
+     */
+    withCamera(stations) {
+        return stations.find(station => station.youtube) ?? null;
     }
 
     /**
