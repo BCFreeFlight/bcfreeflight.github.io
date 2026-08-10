@@ -142,6 +142,20 @@ export class Trends {
     }
 
     /**
+     * Takes the newest readings without disturbing anything on screen.
+     *
+     * Called when the page refreshes in place. `mount` would tear every chart
+     * down and build it again, which closes an open measurement list and blinks
+     * the charts; this keeps the panels exactly as they are and only re-reads.
+     * The day is cached, so most refreshes cost nothing at all.
+     *
+     * @returns {Promise<void>}
+     */
+    refresh() {
+        return this.loadDays();
+    }
+
+    /**
      * Makes sure a panel that has just been shown is drawn at its real size.
      *
      * A chart drawn while its tab was hidden had no width to draw into, so the

@@ -115,14 +115,18 @@ export class Index {
      * @param {Object} entry - A station entry: station, observation, metrics
      * @returns {string} HTML markup
      */
-    renderStationView(entry) {
-        const observation = entry.observation;
-        const key = entry.station.key;
-        const wind = readings.wind(observation);
-
+    /**
+     * The two wind tiles: which way it is blowing, and how hard.
+     *
+     * Kept apart from the panel around it because a refresh rewrites these two
+     * tiles on their own, leaving everything else — including the chart — where
+     * it stands.
+     *
+     * @param {Object} wind - A shared wind reading
+     * @returns {string} HTML markup
+     */
+    renderWindRow(wind) {
         return `
-            <div class="view" id="panel-${key}" role="tabpanel" tabindex="0"
-                 aria-labelledby="tab-${key}" data-view="${key}" hidden>
                 <div class="wind-row">
                     <section class="wind-card wind-card--direction">
                         <span class="label"><span class="label-icon" aria-hidden="true">explore</span>Wind direction</span>
@@ -141,11 +145,104 @@ export class Index {
                             ? `<p class="wind-gust">Gusting to <strong>${wind.gust} km/h</strong></p>`
                             : ''}
                     </section>
-                </div>
+                </div>`;
+    }
 
-                ${this.renderReadouts(observation, entry.metrics)}
+    renderStationView(entry) {
+        const key = entry.station.key;
+
+        return `
+            <div class="view" id="panel-${key}" role="tabpanel" tabindex="0"
+                 aria-labelledby="tab-${key}" data-view="${key}" hidden>
+                ${this.renderWindRow(readings.wind(entry.observation))}
+                ${this.renderReadouts(entry.observation, entry.metrics)}
                 ${trends.render(entry.station)}
             </div>`;
+    }
+
+    /**
+     * Rebuilds part of the page without moving the reader.
+     *
+     * Replacing markup empties the document for an instant, and a document with
+     * no height cannot hold a scroll position — the browser clamps it to the top
+     * and the reader loses their place. Putting it back afterwards is not quite
+     * enough on its own either, because the charts size themselves a frame
+     * later and the page grows again underneath; hence the second pass.
+     *
+     * @param {function(): void} rebuild - The work that replaces markup
+     * @returns {void}
+     */
+    keepingPlace(rebuild) {
+        const top = window.scrollY;
+
+        rebuild();
+
+        // Nothing to restore if the reader had not scrolled at all.
+        if (!top) return;
+
+        window.scrollTo({top, behavior: 'instant'});
+        requestAnimationFrame(() => window.scrollTo({top, behavior: 'instant'}));
+    }
+
+    /**
+     * What the page is built out of, as a string.
+     *
+     * Everything that decides the *shape* of the page goes in here: which
+     * stations there are, what order they are in, and which of them are
+     * reporting. Readings deliberately do not — they change every minute, and
+     * changing a reading should never cost the reader their place on the page.
+     *
+     * @param {Object[]} loaded - Station entries from Weather.loadStations
+     * @returns {string} A signature to compare against what is on screen
+     */
+    signature(loaded) {
+        return loaded
+            .map(entry => `${entry.station.key}:${entry.online ? 'on' : 'off'}`)
+            .join('|');
+    }
+
+    /**
+     * Writes new readings into the page that is already there.
+     *
+     * The page used to be rebuilt from scratch on every refresh, which threw
+     * away the reader's scroll position — the document collapsed to nothing for
+     * an instant and the browser pinned the scroll back to the top. It also
+     * tore down every chart, along with any measurement list left open.
+     *
+     * So when the shape has not changed, only the values are replaced: the
+     * panels, the tabs and the charts are the same elements they were a minute
+     * ago, and nothing moves under the reader.
+     *
+     * @param {Object[]} loaded - Station entries, online or not
+     * @returns {void}
+     */
+    updateInPlace(loaded) {
+        const lapse = document.querySelector('.lapse-tag');
+        if (lapse) lapse.outerHTML = this.renderLapseTag(loaded);
+
+        loaded.forEach(entry => {
+            const key = entry.station.key;
+
+            const meta = document.querySelector(`.tab[data-view="${key}"] .tab-meta`);
+            if (meta) {
+                meta.textContent = entry.online
+                    ? `${Number(entry.observation.uk_hybrid.elev).toLocaleString()} ft ASL`
+                    : 'offline';
+            }
+
+            const view = document.querySelector(`.view[data-view="${key}"]`);
+            if (!view || !entry.online) return;
+
+            const wind = view.querySelector('.wind-row');
+            if (wind) wind.outerHTML = this.renderWindRow(readings.wind(entry.observation));
+
+            const readouts = view.querySelector('.readouts');
+            if (readouts) readouts.outerHTML = this.renderReadouts(entry.observation, entry.metrics);
+        });
+
+        // The charts read their own day on their own cadence; this asks them to
+        // take the newest one without unmounting anything.
+        trends.refresh();
     }
 
     /**
@@ -383,6 +480,9 @@ export class Index {
                         <p>None of ${loaded.map(entry => entry.station.id).join(', ')} is reporting. Try
                            <a href="https://wunderground.com/dashboard/pws/${loaded[0].station.id}" target="_blank" rel="noopener">${loaded[0].station.name} on Weather Underground</a>.</p>
                     </div>`;
+
+                // Nothing is on the page to update any more.
+                this.rendered = null;
                 this.scheduleRefresh(site);
                 return;
             }
@@ -394,27 +494,41 @@ export class Index {
                 }.</p>`
                 : '';
 
-            // Which tab the reader was on, so a refresh does not send them back
-            // to the first station mid-read.
-            const selected = document.querySelector('.tab[aria-selected="true"]')?.dataset.view;
-            const hadFocus = document.activeElement?.classList.contains('tab');
+            const signature = this.signature(loaded);
 
-            weatherDataContainer.innerHTML =
-                notice +
-                this.renderTabs(loaded) +
-                enabled.map(entry => this.renderStationView(entry)).join('');
+            if (signature === this.rendered) {
+                // Same stations, same shape: only the numbers moved. Write them
+                // into the page that is already there, so the reader keeps their
+                // scroll position, their open measurement list and their charts.
+                this.updateInPlace(loaded);
+                this.renderMasthead(loaded);
+            } else {
+                // Which tab the reader was on, so a refresh does not send them
+                // back to the first station mid-read.
+                const selected = document.querySelector('.tab[aria-selected="true"]')?.dataset.view;
+                const hadFocus = document.activeElement?.classList.contains('tab');
 
-            this.renderMasthead(loaded);
+                this.keepingPlace(() => {
+                    weatherDataContainer.innerHTML =
+                        notice +
+                        this.renderTabs(loaded) +
+                        enabled.map(entry => this.renderStationView(entry)).join('');
 
-            // Before the tabs, so the panel revealed by activateView already
-            // has a chart to size.
-            trends.mount(enabled);
+                    this.renderMasthead(loaded);
 
-            const lookup = Object.fromEntries(enabled.map(entry => [entry.station.key, entry]));
-            this.bindTabs(enabled, lookup, selected);
+                    // Before the tabs, so the panel revealed by activateView
+                    // already has a chart to size.
+                    trends.mount(enabled);
 
-            if (hadFocus) {
-                document.querySelector('.tab[aria-selected="true"]')?.focus();
+                    const lookup = Object.fromEntries(enabled.map(entry => [entry.station.key, entry]));
+                    this.bindTabs(enabled, lookup, selected);
+                });
+
+                if (hadFocus) {
+                    document.querySelector('.tab[aria-selected="true"]')?.focus();
+                }
+
+                this.rendered = signature;
             }
 
             // Deliberately not awaited: the readings are already on screen.
@@ -428,6 +542,10 @@ export class Index {
                     <p class="state-title">Couldn't reach the stations</p>
                     <p>The weather service didn't answer. Trying again shortly.</p>
                 </div>`;
+
+            // The page is now a message rather than a set of panels, so the
+            // next good read has to build them again.
+            this.rendered = null;
 
             // Keep trying: a failed load must not end the refresh loop.
             this.refresh.in(RETRY_MS);
