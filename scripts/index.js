@@ -8,8 +8,11 @@ const LAPSE_MAX = 2;
 // Top of the wind bar, in km/h. Anything faster pins the bar full.
 const WIND_SCALE = 40;
 
+// Speed at which the windsock reads fully extended, in km/h.
+const WINDSOCK_FULL = 20;
+
 const LAUNCH_STATION = 'ILUMBY7';
-const GROUND_STATION = 'ILUMBY2';
+const GROUND_STATION = 'ILUMBY8';
 
 // Shown wherever a station reports nothing for a field.
 const NO_READING = '&mdash;';
@@ -19,12 +22,63 @@ const NO_READING = '&mdash;';
  */
 export class Index {
     /**
-     * Build the wind rose: a fixed compass card whose magenta head points at the
-     * bearing the wind is blowing from. Ticks every 10°, cardinals at the quarters.
+     * Build the windsock that sits on the dial. Its mouth faces the wind and the
+     * tail streams downwind, the way a real sock hangs. The sock also fills out
+     * with speed: limp and short when calm, fully extended by WINDSOCK_FULL.
      * @param {number} windDir - Direction the wind is coming from, in degrees
+     * @param {?number} windSpeed - Wind speed in km/h
      * @returns {string} SVG markup
      */
-    renderRose(windDir) {
+    renderWindsock(windDir, windSpeed) {
+        const cx = 120, cy = 120;
+        const fullLength = 116;
+
+        // Fraction of full extension, so a calm sock reads as a stubby cone.
+        const extension = 0.42 + 0.58 * Math.min((windSpeed ?? 0) / WINDSOCK_FULL, 1);
+        const length = fullLength * extension;
+
+        // Straddle the hub, so a short sock stays centred instead of drifting upwind.
+        const mouthY = cy + length / 2;
+
+        const mouthHalf = 17;
+        const tailHalf = 7;
+        const bandCount = 5;
+
+        const at = step => {
+            const t = step / bandCount;
+            return {
+                y: mouthY - length * t,
+                half: mouthHalf + (tailHalf - mouthHalf) * t
+            };
+        };
+
+        let bands = '';
+        for (let i = 0; i < bandCount; i++) {
+            const from = at(i);
+            const to = at(i + 1);
+            bands += `<path d="M${cx - from.half} ${from.y} L${cx + from.half} ${from.y}
+                               L${cx + to.half} ${to.y} L${cx - to.half} ${to.y} Z"
+                            fill="${i % 2 === 0 ? '#ee6a10' : '#ffffff'}"
+                            stroke="#16202b" stroke-opacity=".35" stroke-width="1"
+                            stroke-linejoin="round"/>`;
+        }
+
+        return `
+            <g class="windsock" style="transform: rotate(${windDir + 180}deg); transform-origin: ${cx}px ${cy}px;">
+                ${bands}
+                <ellipse cx="${cx}" cy="${mouthY}" rx="${mouthHalf}" ry="4"
+                         fill="#ee6a10" stroke="#16202b" stroke-opacity=".35" stroke-width="1"/>
+            </g>`;
+    }
+
+    /**
+     * Build the wind rose: a fixed compass card carrying the windsock.
+     * Ticks every 10°, cardinals at the quarters.
+     * @param {number} windDir - Direction the wind is coming from, in degrees
+     * @param {?number} windSpeed - Wind speed in km/h
+     * @returns {string} SVG markup
+     */
+    renderRose(windDir, windSpeed) {
         const cx = 120, cy = 120;
         const bearing = Math.round(windDir);
         let ticks = '';
@@ -49,16 +103,14 @@ export class Index {
             }).join('');
 
         return `
-            <div class="rose" role="img" aria-label="Wind from ${bearing} degrees">
-                <svg class="rose-dial" viewBox="0 0 240 240" aria-hidden="true">
-                    <circle cx="${cx}" cy="${cy}" r="104" fill="#fbfaf7" stroke="#ddd8ce"/>
-                    <circle cx="${cx}" cy="${cy}" r="62" fill="none" stroke="#ddd8ce" stroke-dasharray="2 5"/>
-                    ${ticks}
-                    ${cardinals}
-                </svg>
-                <span class="material-symbols-outlined weather-icon needle" aria-hidden="true"
-                      style="transform: rotate(${bearing}deg);">navigation</span>
-            </div>`;
+            <svg class="rose" viewBox="0 0 240 240" role="img"
+                 aria-label="Wind from ${bearing} degrees">
+                <circle cx="${cx}" cy="${cy}" r="104" fill="#fbfaf7" stroke="#ddd8ce"/>
+                <circle cx="${cx}" cy="${cy}" r="62" fill="none" stroke="#ddd8ce" stroke-dasharray="2 5"/>
+                ${ticks}
+                ${cardinals}
+                ${this.renderWindsock(windDir, windSpeed)}
+            </svg>`;
     }
 
     /**
@@ -101,7 +153,7 @@ export class Index {
         if (!lapse || lapse.lapseRate === null) {
             return `
                 <div class="stat-cell">
-                    <span class="label">Lapse rate</span>
+                    <span class="label"><span class="label-icon" aria-hidden="true">elevation</span>Lapse rate</span>
                     <p class="stat-value is-empty">${NO_READING}</p>
                     ${this.renderLapseScale(null)}
                     <p class="stat-note">Needs both stations reporting.${
@@ -112,7 +164,7 @@ export class Index {
 
         return `
             <div class="stat-cell">
-                <span class="label">Lapse rate &middot; ${Math.round(Number(lapse.elevDiff)).toLocaleString()} ft split</span>
+                <span class="label"><span class="label-icon" aria-hidden="true">elevation</span>Lapse rate &middot; ${Math.round(Number(lapse.elevDiff)).toLocaleString()} ft split</span>
                 <p class="stat-value">${lapse.lapseRate}<span class="unit">ºC/1000 ft</span></p>
                 ${this.renderLapseScale(Number(lapse.lapseRate))}
                 <p class="stat-note"><span class="lapse-name">${lapse.details.name}</span> &mdash; ${lapse.details.description}</p>
@@ -131,52 +183,58 @@ export class Index {
             reading === null || reading === undefined ? NO_READING : Number(reading).toFixed(digits);
 
         const readouts = [
-            {label: 'Temperature', value: value(uk.temp), unit: 'ºC'},
+            {label: 'Temperature', icon: 'device_thermostat', value: value(uk.temp), unit: 'ºC'},
             {
                 label: 'Dew Point',
+                icon: 'opacity',
                 value: metrics.dewPoint?.celsius ?? NO_READING,
                 unit: 'ºC',
                 note: metrics.dewPoint?.description
             },
             {
                 label: 'Humidity',
+                icon: 'humidity_percentage',
                 value: metrics.humidity?.percent ?? NO_READING,
                 unit: '%',
                 note: metrics.humidity?.description
             },
             {
                 label: 'Heat Index',
+                icon: 'wb_sunny',
                 value: metrics.heatIndex?.celsius ?? NO_READING,
                 unit: 'ºC',
                 note: metrics.heatIndex?.description
             },
             {
                 label: 'Wind Chill',
+                icon: 'ac_unit',
                 value: metrics.windChill?.celsius ?? NO_READING,
                 unit: 'ºC',
                 note: metrics.windChill?.description
             },
             {
                 label: 'Barometric Pressure',
+                icon: 'speed',
                 value: metrics.barometricPressure?.kPa ?? NO_READING,
                 unit: metrics.barometricPressure ? 'kPa' : '',
                 note: metrics.barometricPressure?.description ?? 'This station does not report pressure.'
             },
             {
                 label: 'UV Index',
+                icon: 'light_mode',
                 value: observation.uv ?? NO_READING,
                 note: metrics.uvIndex ? `${metrics.uvIndex.risk} — ${metrics.uvIndex.description}` : undefined
             },
-            {label: 'Solar Radiation', value: observation.solarRadiation ?? NO_READING, unit: 'W/m²'},
-            {label: 'Rainfall', value: value(uk.precipTotal, 2), unit: 'mm', note: 'Total so far today'},
-            {label: 'Precipitation Rate', value: value(uk.precipRate, 2), unit: 'mm/hr'}
+            {label: 'Solar Radiation', icon: 'brightness_7', value: observation.solarRadiation ?? NO_READING, unit: 'W/m²'},
+            {label: 'Rainfall', icon: 'water_drop', value: value(uk.precipTotal, 2), unit: 'mm', note: 'Total so far today'},
+            {label: 'Precipitation Rate', icon: 'grain', value: value(uk.precipRate, 2), unit: 'mm/hr'}
         ];
 
         return `
             <section class="readouts">
                 ${readouts.map((item, i) => `
                     <div class="readout" style="--i: ${i}">
-                        <span class="label">${item.label}</span>
+                        <span class="label"><span class="label-icon" aria-hidden="true">${item.icon}</span>${item.label}</span>
                         <p class="readout-value${item.value === NO_READING ? ' is-empty' : ''}">${item.value}${item.unit ? `<span class="unit">${item.unit}</span>` : ''}</p>
                         ${item.note ? `<p class="readout-note">${item.note}</p>` : ''}
                     </div>`).join('')}
@@ -204,16 +262,16 @@ export class Index {
                  aria-labelledby="tab-${view.key}" data-view="${view.key}" hidden>
                 <section class="panel">
                     <div class="rose-cell">
-                        ${this.renderRose(observation.winddir)}
+                        ${this.renderRose(observation.winddir, uk.windSpeed)}
                         <div class="rose-readout">
-                            <span class="label">Wind from</span>
+                            <span class="label"><span class="label-icon" aria-hidden="true">navigation</span>Wind from</span>
                             <span class="cardinal">${weather.degreesToDirection(observation.winddir)}</span>
                             <span class="bearing">${Math.round(observation.winddir)}°</span>
                         </div>
                     </div>
 
                     <div class="stat-cell">
-                        <span class="label">Wind speed</span>
+                        <span class="label"><span class="label-icon" aria-hidden="true">air</span>Wind speed</span>
                         <p class="stat-value">${value(uk.windSpeed)}<span class="unit">km/h</span></p>
                         <div class="gust-track">
                             <span class="gust-fill" style="width: ${gustPct}%"></span>
