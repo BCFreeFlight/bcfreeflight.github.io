@@ -7,6 +7,7 @@ import {barbCounts, barbPath, PENNANT, MAXIMUM_FEATHERS, CALM_RINGS} from '../sc
 import {sunHeight, clearSky, shadeFraction} from '../scripts/lib/solar.js';
 import {temperatureAt, thermalTop, updraft, DRY_ADIABAT} from '../scripts/lib/thermal.js';
 import {CEILING, COLUMN_MS, STRIPS} from '../scripts/config/rasp.js';
+import {reveal} from '../scripts/lib/reveal.js';
 
 /**
  * The windgram.
@@ -589,6 +590,55 @@ describe('smoothing the profile', () => {
     });
 });
 
+describe('showing and hiding a piece of a drawing', () => {
+    /**
+     * @returns {SVGElement} A detached SVG group, hidden
+     */
+    const group = () => {
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('hidden', '');
+        return g;
+    };
+
+    it('is not something the hidden property can do to SVG', () => {
+        // The reason this module exists. `hidden` belongs to HTMLElement, so
+        // assigning it on an SVG node sets a stray property and leaves the
+        // attribute — and the element — exactly as they were. It fails without
+        // a word, which is how the crosshair came to sit visible at the left
+        // edge of every day chart.
+        const g = group();
+        g.hidden = false;
+
+        ok(g.hasAttribute('hidden'), 'the attribute survived the assignment');
+    });
+
+    it('shows an SVG element', () => {
+        const g = group();
+        reveal(g, true);
+        ok(!g.hasAttribute('hidden'));
+    });
+
+    it('hides an SVG element', () => {
+        const g = group();
+        reveal(g, true);
+        reveal(g, false);
+        ok(g.hasAttribute('hidden'));
+    });
+
+    it('works on ordinary HTML too', () => {
+        const div = document.createElement('div');
+        reveal(div, false);
+        ok(div.hasAttribute('hidden'));
+        reveal(div, true);
+        ok(!div.hasAttribute('hidden'));
+    });
+
+    it('does not fall over when there is nothing to show', () => {
+        reveal(null, true);
+        reveal(undefined, false);
+    });
+});
+
 describe('drawing it', () => {
     /**
      * Renders a windgram offscreen and hands back its markup.
@@ -634,6 +684,75 @@ describe('drawing it', () => {
 
     it('draws barbs', () => {
         ok(draw(buildWindgram(real())).includes('windgram-barb'));
+    });
+
+    it('gives every barb a target big enough to tap', () => {
+        const markup = draw(buildWindgram(real()));
+        const hits = markup.match(/class="windgram-barb-hit"/g) ?? [];
+        const barbs = markup.match(/class="windgram-barb"/g) ?? [];
+        const calms = markup.match(/class="windgram-calm"/g) ?? [];
+
+        // One target per mark, and the calms are drawn as two rings each.
+        equal(hits.length, barbs.length + calms.length / 2);
+        ok(hits.length > 0, 'there are some');
+    });
+
+    it('hangs the reading behind each barb off its target', () => {
+        const markup = draw(buildWindgram(real()));
+        const hit = markup.match(/<circle class="windgram-barb-hit"[^>]*>/)[0];
+
+        ok(/data-speed="[\d.]+"/.test(hit), `speed: ${hit}`);
+        ok(/data-point="[A-Z]{1,3}"/.test(hit), `compass point: ${hit}`);
+        ok(/data-station="[^"]+"/.test(hit), `station: ${hit}`);
+        ok(/aria-label="[^"]*km\/h/.test(hit), `and it is announced: ${hit}`);
+    });
+
+    it('names the barb that was tapped', () => {
+        const host = document.createElement('div');
+        host.style.cssText = 'width:900px;position:absolute;left:-9999px;top:0';
+        document.body.appendChild(host);
+
+        const windgram = new Windgram(host);
+        windgram.setModel(buildWindgram(real()));
+
+        const hit = host.querySelector('.windgram-barb-hit');
+        windgram.showTip(hit);
+
+        const tip = host.querySelector('.windgram-tip');
+
+        ok(!tip.hasAttribute('hidden'), 'the popup is showing');
+        equal(tip.querySelector('.windgram-tip-point').textContent, hit.dataset.point);
+        equal(tip.querySelector('.windgram-tip-speed').textContent, `${hit.dataset.speed} km/h`);
+
+        windgram.hideTip();
+        ok(tip.hasAttribute('hidden'), 'and it goes away again');
+
+        windgram.destroy();
+        host.remove();
+    });
+
+    it('keeps the popup inside the drawing at the right-hand edge', () => {
+        const host = document.createElement('div');
+        host.style.cssText = 'width:900px;position:absolute;left:-9999px;top:0';
+        document.body.appendChild(host);
+
+        const windgram = new Windgram(host);
+        windgram.setModel(buildWindgram(real()));
+
+        const hits = [...host.querySelectorAll('.windgram-barb-hit')];
+        const last = hits.reduce((best, hit) =>
+            Number(hit.getAttribute('cx')) > Number(best.getAttribute('cx')) ? hit : best, hits[0]);
+
+        windgram.showTip(last);
+
+        const box = host.querySelector('.windgram-tip-box');
+        const left = Number(box.getAttribute('x'));
+
+        ok(left < Number(last.getAttribute('cx')), 'folded back over the barb');
+        ok(left > 0, 'and still on the drawing');
+
+        windgram.destroy();
+        host.remove();
     });
 
     it('marks the air above the top station as extrapolated', () => {

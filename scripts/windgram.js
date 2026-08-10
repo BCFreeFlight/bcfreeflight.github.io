@@ -5,6 +5,7 @@ import {LAPSE} from './config/bands.js';
 import {FEET} from './rasp.js';
 import {barbPath, barbCounts, CALM_RINGS} from './lib/barb.js';
 import {escape} from './lib/markup.js';
+import {reveal} from './lib/reveal.js';
 import {pointAt} from './config/compass.js';
 
 /**
@@ -32,6 +33,13 @@ const TICK_STEP = 500;
 const TICK_CLEARANCE = 140;
 
 const HOUR = 3600000;
+
+// How big a target each barb gets. Well over the size of the mark itself,
+// because the mark is a few hairlines and the pointer is often a fingertip.
+const HIT_RADIUS = 13;
+
+/** The tap-a-barb popup. Fixed, because two short lines never need more. */
+const TIP = {width: 78, height: 36, gap: 10};
 
 /**
  * Round numbers for a strip's axis.
@@ -168,12 +176,18 @@ export class Windgram {
                     <line class="windgram-crosshair" y1="${LAYOUT.top}" y2="${this.bottom}"></line>
                     <g class="windgram-values"></g>
                 </g>
+                <g class="windgram-tip" hidden>
+                    <rect class="windgram-tip-box" width="${TIP.width}" height="${TIP.height}" rx="5"></rect>
+                    <text class="windgram-tip-point"></text>
+                    <text class="windgram-tip-speed"></text>
+                </g>
             </svg>`;
 
         this.svg = this.host.querySelector('.windgram-svg');
         this.readout = this.host.querySelector('.windgram-readout');
         this.crosshair = this.host.querySelector('.windgram-crosshair');
         this.valueLayer = this.host.querySelector('.windgram-values');
+        this.tip = this.host.querySelector('.windgram-tip');
     }
 
     /**
@@ -532,17 +546,28 @@ export class Windgram {
                 const y = this.y(level.elevation + lift);
                 const at = `${x.toFixed(1)} ${y.toFixed(1)}`;
 
+                const station = this.model.stations.find(entry => entry.key === level.key);
+
+                const reading = {
+                    x: x.toFixed(1),
+                    y: y.toFixed(1),
+                    speed: level.windSpeed.toFixed(1),
+                    point: level.windDir === null ? '' : pointAt(level.windDir).abbr,
+                    station: station?.shortName ?? station?.name ?? ''
+                };
+
                 // A calm has no direction worth pointing at, so it is marked
                 // by rings rather than by a staff aimed down an average of
                 // nothing.
                 if (barbCounts(level.windSpeed).calm) {
-                    marks.push({calm: true, x: x.toFixed(1), y: y.toFixed(1)});
+                    marks.push({...reading, calm: true});
                     return;
                 }
 
                 // The staff is drawn pointing up and turned to the bearing the
                 // wind is coming from, which is what the reading names.
                 marks.push({
+                    ...reading,
                     d: barbPath(level.windSpeed),
                     transform: `translate(${at}) rotate(${level.windDir.toFixed(0)})`
                 });
@@ -560,9 +585,21 @@ export class Windgram {
             : `<path class="windgram-barb${kind}" d="${mark.d}" transform="${mark.transform}"></path>`
         ).join('');
 
+        // A barb is a few thin strokes, which is far too small a target for a
+        // finger. Each gets an invisible disc over it instead, laid last so it
+        // sits above every drawn mark.
+        const hits = marks.map(mark => `
+            <circle class="windgram-barb-hit" cx="${mark.x}" cy="${mark.y}" r="${HIT_RADIUS}"
+                    data-speed="${mark.speed}" data-point="${escape(mark.point)}"
+                    data-station="${escape(mark.station)}"
+                    role="img" aria-label="${escape(
+                        `${mark.station} ${mark.speed} km/h${mark.point ? ` ${mark.point}` : ''}`)}"></circle>`
+        ).join('');
+
         // Every halo first, then every barb: drawn barb by barb, one mark's
         // halo would sit on top of its neighbour's white.
-        return `<g class="windgram-barbs">${pass('-halo')}${pass('')}</g>`;
+        return `<g class="windgram-barbs">${pass('-halo')}${pass('')}</g>`
+            + `<g class="windgram-barb-hits">${hits}</g>`;
     }
 
     /**
@@ -760,6 +797,13 @@ export class Windgram {
         const move = event => {
             if (!this.svg || !this.model) return;
 
+            // A barb under the pointer names itself, and the column readout is
+            // left alone underneath: one answers "what was the wind here", the
+            // other "what was the day doing at this moment".
+            const hit = event.target.closest?.('.windgram-barb-hit');
+            if (hit) this.showTip(hit);
+            else this.hideTip();
+
             const box = this.svg.getBoundingClientRect();
             const scale = box.width / this.svg.viewBox.baseVal.width;
             const x = (event.clientX - box.left) / scale;
@@ -780,7 +824,58 @@ export class Windgram {
 
         this.host.addEventListener('pointermove', move);
         this.host.addEventListener('pointerdown', move);
-        this.host.addEventListener('pointerleave', () => this.hideReadout());
+        this.host.addEventListener('pointerleave', () => {
+            this.hideReadout();
+            this.hideTip();
+        });
+    }
+
+    /**
+     * Names the barb under the pointer: which way, and how fast.
+     *
+     * The barb itself is rounded to the nearest five by design, so the popup
+     * gives the reading behind it rather than repeating what the feathers
+     * already say — otherwise there is no way to tell a rounded-down nine from
+     * a rounded-up eleven.
+     *
+     * @param {SVGElement} hit - The target disc over a barb
+     * @returns {void}
+     */
+    showTip(hit) {
+        const x = Number(hit.getAttribute('cx'));
+        const y = Number(hit.getAttribute('cy'));
+
+        // Above and to the right, until that would put it outside the panel,
+        // then folded back over the barb on whichever side has the room.
+        const left = x + TIP.gap + TIP.width > this.right
+            ? x - TIP.gap - TIP.width
+            : x + TIP.gap;
+
+        const top = y - TIP.gap - TIP.height < this.top
+            ? y + TIP.gap
+            : y - TIP.gap - TIP.height;
+
+        this.tip.querySelector('.windgram-tip-box').setAttribute('x', left.toFixed(1));
+        this.tip.querySelector('.windgram-tip-box').setAttribute('y', top.toFixed(1));
+
+        const point = this.tip.querySelector('.windgram-tip-point');
+        point.setAttribute('x', (left + TIP.width / 2).toFixed(1));
+        point.setAttribute('y', (top + 15).toFixed(1));
+        point.textContent = hit.dataset.point || '—';
+
+        const speed = this.tip.querySelector('.windgram-tip-speed');
+        speed.setAttribute('x', (left + TIP.width / 2).toFixed(1));
+        speed.setAttribute('y', (top + 28).toFixed(1));
+        speed.textContent = `${hit.dataset.speed} km/h`;
+
+        reveal(this.tip, true);
+    }
+
+    /**
+     * @returns {void}
+     */
+    hideTip() {
+        reveal(this.tip, false);
     }
 
     /**
@@ -833,13 +928,13 @@ export class Windgram {
             <text class="windgram-readout-line" x="${(x + offset).toFixed(1)}"
                   y="${this.top + 14 + row * 13}" text-anchor="${anchor}">${escape(line)}</text>`).join('');
 
-        this.readout.hidden = false;
+        reveal(this.readout, true);
     }
 
     /**
      * @returns {void}
      */
     hideReadout() {
-        if (this.readout) this.readout.hidden = true;
+        reveal(this.readout, false);
     }
 }

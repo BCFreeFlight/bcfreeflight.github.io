@@ -627,6 +627,10 @@ a { color: var(--accent); }
 
 .chart-svg { display: block; width: 100%; height: auto; overflow: visible; }
 
+/* Stated rather than left to the browser: the [hidden] rule in a user-agent
+   stylesheet is written for HTML, and everything here is SVG. */
+.chart-readout[hidden] { display: none; }
+
 .chart-line { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
 
 .chart-band { fill: rgba(22, 32, 43, .04); }
@@ -915,6 +919,34 @@ a { color: var(--accent); }
     stroke: #ffffff;
     stroke-width: 1.4;
 }
+
+/* Invisible, but a real target: a barb is a few hairlines and a fingertip is
+   not. Nothing is drawn here, so it must not eat the crosshair's cursor. */
+.windgram-barb-hit {
+    fill: transparent;
+    cursor: pointer;
+}
+
+.windgram-tip[hidden] { display: none; }
+
+.windgram-tip-box {
+    fill: #16202b;
+    opacity: .92;
+}
+
+.windgram-tip-point,
+.windgram-tip-speed {
+    text-anchor: middle;
+    fill: #ffffff;
+}
+
+.windgram-tip-point {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .04em;
+}
+
+.windgram-tip-speed { font-size: 11px; font-weight: 600; }
 
 .windgram-axis {
     font-size: 10px;
