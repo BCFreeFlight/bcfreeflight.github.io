@@ -4,9 +4,6 @@ import sites from './sites.js';
 import youtube from './youtube.js';
 import * as readings from './readings.js';
 
-// Top of the wind bar, in km/h. Anything faster pins the bar full.
-const WIND_SCALE = 40;
-
 // Speed at which the windsock reads fully extended, in km/h.
 const WINDSOCK_FULL = 20;
 
@@ -23,16 +20,21 @@ const NO_READING = readings.NO_READING;
  */
 export class Index {
     /**
-     * Build the windsock that sits on the dial. Its mouth faces the wind and the
-     * tail streams downwind, the way a real sock hangs. The sock also fills out
-     * with speed: limp and short when calm, fully extended by WINDSOCK_FULL.
-     * @param {number} rotation - Bearing the tail should stream towards, in degrees
+     * A windsock, pointing the way the wind is going.
+     *
+     * It stands on its own rather than on a compass dial: the direction is
+     * written out in words beside it, so the picture only has to show which way
+     * the wind blows, not let anyone measure a bearing off it. The sock fills
+     * out with speed too, limp when calm and streaming by WINDSOCK_FULL.
+     *
+     * @param {Object} wind - A shared wind reading: cardinal, rotation, words
      * @param {?number} windSpeed - Wind speed in km/h
      * @returns {string} SVG markup
      */
-    renderWindsock(rotation, windSpeed) {
+    renderWindsock(wind, windSpeed) {
         const cx = 120, cy = 120;
-        const fullLength = 116;
+        const rotation = wind.rotation;
+        const fullLength = 150;
 
         // Fraction of full extension, so a calm sock reads as a stubby cone.
         const extension = 0.42 + 0.58 * Math.min((windSpeed ?? 0) / WINDSOCK_FULL, 1);
@@ -41,8 +43,8 @@ export class Index {
         // Straddle the hub, so a short sock stays centred instead of drifting upwind.
         const mouthY = cy + length / 2;
 
-        const mouthHalf = 17;
-        const tailHalf = 7;
+        const mouthHalf = 26;
+        const tailHalf = 10;
         const bandCount = 5;
 
         const at = step => {
@@ -65,52 +67,13 @@ export class Index {
         }
 
         return `
-            <g class="windsock" style="transform: rotate(${rotation}deg); transform-origin: ${cx}px ${cy}px;">
-                ${bands}
-                <ellipse cx="${cx}" cy="${mouthY}" rx="${mouthHalf}" ry="4"
-                         fill="#ee6a10" stroke="#16202b" stroke-opacity=".35" stroke-width="1"/>
-            </g>`;
-    }
-
-    /**
-     * Build the wind rose: a fixed compass card carrying the windsock.
-     * Ticks every 10°, cardinals at the quarters.
-     * @param {Object} wind - A shared wind reading: cardinal, bearing, rotation
-     * @param {?number} windSpeed - Wind speed in km/h
-     * @returns {string} SVG markup
-     */
-    renderRose(wind, windSpeed) {
-        const cx = 120, cy = 120;
-        const bearing = wind.bearing;
-        let ticks = '';
-
-        for (let deg = 0; deg < 360; deg += 10) {
-            const major = deg % 30 === 0;
-            const outer = 104;
-            const inner = major ? 94 : 99;
-            const rad = (deg - 90) * Math.PI / 180;
-            ticks += `<line x1="${cx + Math.cos(rad) * inner}" y1="${cy + Math.sin(rad) * inner}"
-                            x2="${cx + Math.cos(rad) * outer}" y2="${cy + Math.sin(rad) * outer}"
-                            stroke="${major ? '#c3bcae' : '#ddd8ce'}" stroke-width="${major ? 1.5 : 1}"/>`;
-        }
-
-        const cardinals = [['N', 0], ['E', 90], ['S', 180], ['W', 270]]
-            .map(([letter, deg]) => {
-                const rad = (deg - 90) * Math.PI / 180;
-                return `<text x="${cx + Math.cos(rad) * 78}" y="${cy + Math.sin(rad) * 78}"
-                              text-anchor="middle" dominant-baseline="central"
-                              font-family="Archivo, sans-serif" font-size="13" font-weight="600"
-                              letter-spacing="1" fill="#66707c">${letter}</text>`;
-            }).join('');
-
-        return `
-            <svg class="rose" viewBox="0 0 240 240" role="img"
-                 aria-label="Wind from ${wind.cardinal}, ${bearing} degrees">
-                <circle cx="${cx}" cy="${cy}" r="104" fill="#fbfaf7" stroke="#ddd8ce"/>
-                <circle cx="${cx}" cy="${cy}" r="62" fill="none" stroke="#ddd8ce" stroke-dasharray="2 5"/>
-                ${ticks}
-                ${cardinals}
-                ${this.renderWindsock(wind.rotation, windSpeed)}
+            <svg class="windsock" viewBox="0 0 240 240" role="img"
+                 aria-label="Wind from the ${wind.cardinalWords ?? 'unknown direction'}">
+                <g style="transform: rotate(${rotation}deg); transform-origin: ${cx}px ${cy}px;">
+                    ${bands}
+                    <ellipse cx="${cx}" cy="${mouthY}" rx="${mouthHalf}" ry="6"
+                             fill="#ee6a10" stroke="#16202b" stroke-opacity=".35" stroke-width="1"/>
+                </g>
             </svg>`;
     }
 
@@ -148,7 +111,7 @@ export class Index {
                     ${segments.map(segment => `
                         <div class="lapse-segment" title="${segment.name}: ${segment.description}">
                             <span class="lapse-swatch" style="background: ${segment.colour};" aria-hidden="true"></span>
-                            <span class="lapse-figure">${segment.rate}</span>
+                            <span class="lapse-figure">${segment.rate.toFixed(2)}</span>
                             <span class="lapse-span">${segment.span}</span>
                             <span class="lapse-gap">${segment.elevDiff.toLocaleString()} ft</span>
                         </div>`).join('')}
@@ -249,33 +212,23 @@ export class Index {
         const uk = observation.uk_hybrid ?? {};
         const wind = readings.wind(observation);
 
-        const speedPct = Math.min((uk.windSpeed ?? 0) / WIND_SCALE, 1) * 100;
-        const gustPct = Math.min((uk.windGust ?? 0) / WIND_SCALE, 1) * 100;
-
         return `
             <div class="view" id="panel-${key}" role="tabpanel" tabindex="0"
                  aria-labelledby="tab-${key}" data-view="${key}" hidden>
-                <section class="panel">
-                    <div class="rose-cell">
-                        ${this.renderRose(wind, uk.windSpeed)}
-                    </div>
+                <section class="wind-card">
+                    ${this.renderWindsock(wind, uk.windSpeed)}
 
-                    <div class="stat-cell">
+                    <div class="wind-body">
                         <span class="label"><span class="label-icon" aria-hidden="true">air</span>Wind</span>
 
-                        <p class="stat-value">
-                            ${wind.cardinal}
-                            <span class="stat-bearing">${wind.bearing}°</span>
-                        </p>
+                        <p class="wind-speed">${wind.speed}<span class="unit">km/h</span></p>
 
-                        <p class="stat-value stat-value--speed">${wind.speed}<span class="unit">km/h</span></p>
+                        ${wind.gusting
+                            ? `<p class="wind-gust">Gusting to <strong>${wind.gust} km/h</strong></p>`
+                            : ''}
 
-                        <div class="gust-track">
-                            <span class="gust-fill" style="width: ${gustPct}%"></span>
-                            <span class="speed-fill" style="width: ${speedPct}%"></span>
-                        </div>
-                        <div class="gust-scale"><span>0</span><span>${WIND_SCALE}+ km/h</span></div>
-                        <p class="stat-note">Gusting to <strong>${wind.gust} km/h</strong></p>
+                        <p class="wind-from">Blowing from the
+                            <strong>${wind.cardinalWords ?? NO_READING}</strong></p>
                     </div>
                 </section>
 

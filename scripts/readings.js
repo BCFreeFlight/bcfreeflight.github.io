@@ -12,6 +12,27 @@ import weather from './weather.js';
 // Shown wherever a station reports nothing for a field.
 export const NO_READING = '—';
 
+// Compass points written out. "SSW" is jargon; "south-southwest" is not, and
+// the page has to read for someone who has never seen a wind report.
+const COMPASS_WORDS = {
+    N: 'north',
+    NNE: 'north-northeast',
+    NE: 'northeast',
+    ENE: 'east-northeast',
+    E: 'east',
+    ESE: 'east-southeast',
+    SE: 'southeast',
+    SSE: 'south-southeast',
+    S: 'south',
+    SSW: 'south-southwest',
+    SW: 'southwest',
+    WSW: 'west-southwest',
+    W: 'west',
+    WNW: 'west-northwest',
+    NW: 'northwest',
+    NNW: 'north-northwest'
+};
+
 /**
  * Formats a measurement, or reports its absence.
  * @param {?number} value - The raw reading
@@ -46,10 +67,12 @@ export function wind(observation) {
 
     return {
         cardinal,
+        cardinalWords: known ? COMPASS_WORDS[cardinal] ?? cardinal : null,
         bearing: known ? Math.round(degrees) : null,
         rotation: known ? degrees + 180 : 0,
         speed,
         gust,
+        gusting: gust !== NO_READING && speed !== NO_READING && Number(gust) > Number(speed),
         summary: `${cardinal} ${speed} km/h`,
         gustSummary: `Wind (gust ${gust} km/h)`
     };
