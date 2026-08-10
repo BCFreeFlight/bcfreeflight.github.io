@@ -11,7 +11,7 @@
  */
 
 import {spawn} from 'node:child_process';
-import {mkdtempSync, rmSync} from 'node:fs';
+import {mkdtempSync, readFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
@@ -24,9 +24,11 @@ if (!url || !chrome) {
     process.exit(2);
 }
 
-const port = 9222 + (process.pid % 500);
 const profile = mkdtempSync(join(tmpdir(), 'bcff-tests-'));
 
+// Port 0 asks the operating system for a free one, which Chrome then writes to
+// DevToolsActivePort in the profile. Picking a number ourselves would sooner or
+// later pick one something else is already on.
 const browser = spawn(chrome, [
     '--headless',
     '--disable-gpu',
@@ -37,9 +39,21 @@ const browser = spawn(chrome, [
     '--no-first-run',
     '--disable-extensions',
     `--user-data-dir=${profile}`,
-    `--remote-debugging-port=${port}`,
+    '--remote-debugging-port=0',
     url
-], {stdio: 'ignore'});
+], {stdio: ['ignore', 'ignore', 'pipe']});
+
+// Kept so that a browser which dies on startup can say why, instead of leaving
+// us to report only that it never answered.
+let complaints = '';
+browser.stderr.on('data', chunk => {
+    complaints += chunk;
+});
+
+let exited = null;
+browser.on('exit', code => {
+    exited = code;
+});
 
 /**
  * @param {number} ms - How long to wait
@@ -63,26 +77,61 @@ function finish(code) {
 }
 
 /**
+ * The port Chrome chose, once it has written one down.
+ * @returns {number|null} The port, or null if it has not said yet
+ */
+function chosenPort() {
+    try {
+        const [line] = readFileSync(join(profile, 'DevToolsActivePort'), 'utf8').split('\n');
+        const port = Number(line);
+        return port > 0 ? port : null;
+    } catch (error) {
+        // Chrome has not got that far yet.
+        return null;
+    }
+}
+
+/**
  * The page target, once Chrome is listening.
+ *
+ * A cold build agent can take a good while to get a browser up — the runner
+ * image spends seconds on `--version` alone — so this waits out the same
+ * deadline as the tests themselves rather than a shorter one of its own.
+ *
  * @returns {Promise<Object>} The target description
  */
 async function target() {
-    for (let attempt = 0; attempt < 100; attempt++) {
-        try {
-            const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-            const page = targets.find(entry => entry.type === 'page' && entry.webSocketDebuggerUrl);
-            if (page) return page;
-        } catch (error) {
-            // Chrome is not up yet.
+    const until = Date.now() + deadline;
+
+    while (Date.now() < until) {
+        if (exited !== null) {
+            throw new Error(`Chrome exited with ${exited} before listening.${complaints ? `\n${complaints.trim()}` : ''}`);
+        }
+
+        const port = chosenPort();
+        if (port) {
+            try {
+                const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+                const page = targets.find(entry => entry.type === 'page' && entry.webSocketDebuggerUrl);
+                if (page) return page;
+            } catch (error) {
+                // Listening, but not ready to describe its tabs yet.
+            }
         }
 
         await wait(100);
     }
 
-    throw new Error('Chrome never started listening');
+    throw new Error(`Chrome never started listening within ${deadline}ms.${complaints ? `\n${complaints.trim()}` : ''}`);
 }
 
-const page = await target();
+let page;
+try {
+    page = await target();
+} catch (error) {
+    console.error(String(error.message));
+    finish(1);
+}
 const socket = new WebSocket(page.webSocketDebuggerUrl);
 
 await new Promise((resolve, reject) => {
