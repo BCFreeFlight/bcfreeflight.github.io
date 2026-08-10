@@ -1,0 +1,518 @@
+import {COLUMN_MS, CEILING, GROUND_MARGIN, ISOTHERM_STEP, CLOUD_DEPRESSION} from './config/rasp.js';
+import {LAPSE} from './config/bands.js';
+import {band, isNumber} from './lib/numbers.js';
+import {lapseRate, MINIMUM_GAP} from './lib/lapse.js';
+import {sunHeight, clearSky, shadeFraction} from './lib/solar.js';
+import {temperatureAt, thermalTop, updraft} from './lib/thermal.js';
+
+/**
+ * The day, as a column of air.
+ *
+ * Every other chart on the site plots one station against time. This one plots
+ * the whole hillside against time: the stations stop being three separate lines
+ * and become three heights in a single profile, which is how a soaring forecast
+ * is actually read. What is between them is interpolated, what is above them is
+ * extrapolated, and the model says which is which so the drawing can too.
+ *
+ * The model is built once and handed to the renderer. Nothing in here knows
+ * about pixels, and nothing in the renderer knows about lapse rates.
+ */
+
+/** Weather Underground reports elevation in feet; the physics is all metric. */
+export const FEET = 0.3048;
+
+// How finely the cloud and profile fields are sampled up the column. Fine
+// enough that a cloud band lands on the right side of a station, coarse enough
+// that a day of columns is still a few thousand samples.
+const SAMPLE_STEP = 60;
+
+// Roughly how far a parcel has to rise before it reaches its dew point, per
+// degree of spread between temperature and dew point. The standard field
+// approximation, and accurate to a few percent over the range that matters.
+const LCL_PER_DEGREE = 125;
+
+/**
+ * Over how long the temperature is averaged before the air between two stations
+ * is judged.
+ *
+ * A lapse rate is a difference between two thermometers a few hundred metres
+ * apart, so a tenth of a degree of noise at either end moves it by more than
+ * the width of a stability band. Left raw, the drawing comes out striped —
+ * every column a slightly different colour from its neighbours — which reads as
+ * the air changing every half hour when it is really the sensors twitching.
+ *
+ * An hour and a half is about how fast the stability of a mountain afternoon
+ * actually changes. Written as a duration rather than as a number of columns,
+ * so that changing how wide a column is does not silently change how hard the
+ * drawing is smoothed.
+ */
+const SMOOTH_MINUTES = 90;
+
+/**
+ * How much sunlight has to be landing before the drawing will claim a thermal.
+ *
+ * The parcel calculation has no idea what time it is: give it a trigger offset
+ * and a lapse rate and it will happily report a two-thousand-metre thermal top
+ * at three in the morning, because the air overnight really is that unstable —
+ * there is simply nothing heating the ground to set a bubble off. Requiring
+ * real sunlight is what turns an arithmetic result back into a forecast.
+ */
+const THERMAL_SUN = 60;
+
+// Sunlight is smoothed less: a cloud crossing the sun is a real event on this
+// timescale, not noise, and over-smoothing it would flatten the cloud strip.
+const SMOOTH_SOLAR_MINUTES = 30;
+
+/**
+ * A smoothing window in columns, from one in minutes. Always odd, so the
+ * average is centred on the reading it replaces rather than half a column off.
+ * @param {number} minutes - How long to average over
+ * @returns {number} A column count of at least one
+ */
+function window(minutes) {
+    const columns = Math.round(minutes * 60000 / COLUMN_MS);
+    return Math.max(1, columns % 2 ? columns : columns + 1);
+}
+
+/**
+ * A rolling average down a column of readings, gaps left as gaps.
+ *
+ * Centred rather than trailing, because this is a chart of a day that has
+ * already happened: there is no reason to lag it the way a live indicator
+ * would have to.
+ *
+ * @param {Array<?number>} values - The readings, in order
+ * @param {number} span - How many columns to average over
+ * @returns {Array<?number>} The smoothed readings
+ */
+function smooth(values, span) {
+    const reach = Math.floor(span / 2);
+
+    return values.map((value, index) => {
+        // A gap stays a gap: averaging across one would invent a reading for a
+        // time when the station was dark.
+        if (value === null) return null;
+
+        let sum = 0;
+        let count = 0;
+
+        for (let i = Math.max(0, index - reach); i <= Math.min(values.length - 1, index + reach); i++) {
+            if (values[i] === null) continue;
+            sum += values[i];
+            count += 1;
+        }
+
+        return count ? sum / count : null;
+    });
+}
+
+/**
+ * Averages one station's day into fixed-width columns.
+ *
+ * Averaging rather than sampling is what keeps a single gusty five-minute
+ * bucket from setting the direction of a whole column, and it is why direction
+ * is averaged as a vector: the mean of 350º and 10º is north, not south.
+ *
+ * @param {Object} day - A day from the history reader
+ * @param {number} dayStart - The moment the first column starts
+ * @param {number} count - How many columns to fill
+ * @returns {Object[]} One aggregate per column, with nulls where nothing logged
+ */
+function columnise(day, dayStart, count) {
+    const fields = ['temp', 'dewpt', 'windSpeed', 'pressure', 'solar', 'precipRate'];
+
+    const buckets = Array.from({length: count}, () => ({
+        sums: {}, counts: {}, east: 0, north: 0, weight: 0, headings: 0
+    }));
+
+    day.times.forEach((time, index) => {
+        const slot = Math.floor((time - dayStart) / COLUMN_MS);
+        if (slot < 0 || slot >= count) return;
+
+        const bucket = buckets[slot];
+
+        fields.forEach(field => {
+            const value = day.values[field]?.[index];
+            if (!isNumber(value)) return;
+
+            bucket.sums[field] = (bucket.sums[field] ?? 0) + Number(value);
+            bucket.counts[field] = (bucket.counts[field] ?? 0) + 1;
+        });
+
+        const heading = day.values.windDir?.[index];
+        if (!isNumber(heading)) return;
+
+        // Weighted by the wind that was actually blowing, so ten minutes of
+        // calm does not drag the direction of a strong breeze around.
+        const speed = day.values.windSpeed?.[index];
+        const weight = isNumber(speed) ? Math.max(Number(speed), 0.1) : 1;
+        const radians = Number(heading) * Math.PI / 180;
+
+        bucket.east += weight * Math.sin(radians);
+        bucket.north += weight * Math.cos(radians);
+        bucket.weight += weight;
+        bucket.headings += 1;
+    });
+
+    const columns = buckets.map(bucket => {
+        const column = {};
+
+        fields.forEach(field => {
+            column[field] = bucket.counts[field]
+                ? bucket.sums[field] / bucket.counts[field]
+                : null;
+        });
+
+        if (!bucket.headings) {
+            column.windDir = null;
+        } else {
+            const degrees = Math.atan2(bucket.east, bucket.north) * 180 / Math.PI;
+            column.windDir = (degrees + 360) % 360;
+        }
+
+        return column;
+    });
+
+    // Smoothed after the columns are formed rather than before, so a station
+    // that logs every five minutes and one that logs every half hour are
+    // smoothed over the same amount of time rather than the same number of
+    // readings.
+    [['temp', SMOOTH_MINUTES], ['dewpt', SMOOTH_MINUTES], ['solar', SMOOTH_SOLAR_MINUTES]]
+        .forEach(([field, minutes]) => {
+            const smoothed = smooth(columns.map(column => column[field]), window(minutes));
+            columns.forEach((column, index) => { column[field] = smoothed[index]; });
+        });
+
+    return columns;
+}
+
+/**
+ * The stability of one slab of air, as the site already describes stability.
+ * @param {Object} lower - The level below, with elevationFeet and temp
+ * @param {Object} upper - The level above
+ * @returns {?Object} rate and the band it falls in, or null for a zero gap
+ */
+function slab(lower, upper) {
+    const gap = (upper.elevationFeet - lower.elevationFeet) / 1000;
+    if (Math.abs(gap) < MINIMUM_GAP) return null;
+
+    const rate = lapseRate(lower.temp, upper.temp, gap);
+
+    return {rate, band: band(LAPSE, rate)};
+}
+
+/**
+ * The height at which the air is a given temperature.
+ *
+ * Walked from the ground up and answered at the first crossing, because on a
+ * day with an inversion the profile is not monotonic and the isotherm a pilot
+ * cares about is the low one.
+ *
+ * @param {Object[]} levels - Ascending {elevation, temp}, in metres
+ * @param {number} value - The temperature to find, in ºC
+ * @param {number} ceiling - How far above the top station to keep looking
+ * @returns {?number} Height in metres, or null when the air is never that warm
+ */
+function heightAtTemperature(levels, value, ceiling) {
+    if (levels.length < 2) return null;
+
+    const spans = [];
+    for (let i = 0; i < levels.length - 1; i++) {
+        spans.push([levels[i], levels[i + 1]]);
+    }
+
+    // The extrapolated slab above the top station, continued at the gradient
+    // measured between the top two.
+    const top = levels.at(-1);
+    const below = levels.at(-2);
+    const gradient = (top.temp - below.temp) / (top.elevation - below.elevation);
+    spans.push([top, {elevation: ceiling, temp: top.temp + gradient * (ceiling - top.elevation)}]);
+
+    for (const [lower, upper] of spans) {
+        const low = Math.min(lower.temp, upper.temp);
+        const high = Math.max(lower.temp, upper.temp);
+
+        if (value < low || value > high) continue;
+        if (Math.abs(upper.temp - lower.temp) < 1e-9) return lower.elevation;
+
+        const fraction = (value - lower.temp) / (upper.temp - lower.temp);
+        return lower.elevation + fraction * (upper.elevation - lower.elevation);
+    }
+
+    return null;
+}
+
+/**
+ * Where the air is close enough to saturation to be cloud.
+ *
+ * Temperature and dew point are each interpolated up the column and subtracted,
+ * so a band appears wherever the spread between them closes — which, with three
+ * levels, is a coarse answer to a question a sounding answers finely. It is
+ * drawn as hatching rather than as solid cloud for exactly that reason.
+ *
+ * Deliberately stops at the highest station rather than running to the top of
+ * the drawing. Above there, both the temperature and the dew point are being
+ * continued at their own measured gradients, and two straight lines with
+ * different slopes always meet: the extrapolation would confidently hatch a
+ * cloud layer into air nothing has measured, at whatever height the arithmetic
+ * happened to cross.
+ *
+ * @param {Object[]} levels - Ascending levels carrying temp and dewpt
+ * @param {number} ground - The lowest station, in metres
+ * @param {number} top - The highest station, in metres
+ * @returns {Object[]} Bands of {from, to}, in metres
+ */
+function cloudBands(levels, ground, top) {
+    const damp = levels.filter(level => isNumber(level.dewpt));
+    if (damp.length < 2) return [];
+
+    const dewpoints = damp.map(level => ({elevation: level.elevation, temp: level.dewpt}));
+    const bands = [];
+    let open = null;
+
+    for (let height = ground; height <= top; height += SAMPLE_STEP) {
+        const air = temperatureAt(levels, height);
+        const dew = temperatureAt(dewpoints, height);
+        const saturated = air && dew && air.temp - dew.temp < CLOUD_DEPRESSION;
+
+        if (saturated && !open) {
+            open = {from: height, to: height};
+        } else if (saturated) {
+            open.to = height;
+        } else if (open) {
+            bands.push(open);
+            open = null;
+        }
+    }
+
+    if (open) bands.push(open);
+
+    return bands;
+}
+
+/**
+ * Builds the whole drawing's model from the days already read for each station.
+ *
+ * @param {Object[]} entries - {station, elevationFeet, latitude, longitude, day}
+ * @returns {?Object} The model, or null when there is nothing to draw
+ */
+export function buildWindgram(entries) {
+    const charted = entries
+        .filter(entry => entry.day?.times?.length && Number.isFinite(entry.elevationFeet))
+        .sort((a, b) => a.elevationFeet - b.elevationFeet);
+
+    if (!charted.length) return null;
+
+    const dayStart = Math.min(...charted.map(entry => entry.day.dayStart));
+
+    // The drawing stops at the last thing anyone measured. A windgram that ran
+    // to midnight would be three quarters empty for most of the flying day.
+    const lastTime = Math.max(...charted.map(entry => entry.day.times.at(-1)));
+    const count = Math.max(1, Math.ceil((lastTime - dayStart) / COLUMN_MS));
+
+    const aggregated = charted.map(entry => columnise(entry.day, dayStart, count));
+
+    // One barometer for the whole strip.
+    //
+    // The three stations do not agree about what "pressure" means: one of them
+    // reports what its own sensor reads at its own height, another reports the
+    // sea-level equivalent, and the third has no barometer at all. Taking
+    // whichever station happened to report in a given column drew a six
+    // kilopascal cliff at the moment one came online. So the station with the
+    // most readings is chosen once, and the strip is its trace or nothing.
+    const barometer = aggregated
+        .map((station, index) => ({
+            index,
+            readings: station.filter(column => isNumber(column.pressure)).length
+        }))
+        .sort((a, b) => b.readings - a.readings)[0];
+
+    const pressures = barometer?.readings ? aggregated[barometer.index] : null;
+
+    const ground = charted[0].elevationFeet * FEET;
+    const floor = ground - GROUND_MARGIN;
+    const ceiling = Math.max(CEILING, charted.at(-1).elevationFeet * FEET + 500);
+
+    // Solar position is worked out at the lowest station: the three are within
+    // ten kilometres of each other, which is a rounding error at this scale.
+    const {latitude, longitude} = charted[0];
+
+    /**
+     * Where a thermal is taken to start.
+     *
+     * Not the lowest station, which is the obvious choice and the wrong one.
+     * The valley floor spends a summer morning under an inversion — often
+     * sitting in its own fog — and a parcel released into that is capped within
+     * a couple of hundred metres, correctly. But nobody launches from inside an
+     * inversion. Releasing from the valley made the lift strip collapse at the
+     * moment the valley station came online, which said more about which
+     * sensors were awake than about the day.
+     *
+     * So the parcel is released from the site's own launch, and the drawing
+     * says so underneath. What is below launch still shapes the picture — the
+     * inversion is drawn, in its own colour, where it actually is.
+     */
+    const launch = charted.find(entry => entry.station.isDefault) ?? charted[0];
+    const launchElevation = launch.elevationFeet * FEET;
+
+    const columns = [];
+
+    for (let i = 0; i < count; i++) {
+        const time = dayStart + (i + 0.5) * COLUMN_MS;
+
+        const levels = charted
+            .map((entry, station) => ({
+                key: entry.station.key,
+                elevationFeet: entry.elevationFeet,
+                elevation: entry.elevationFeet * FEET,
+                ...aggregated[station][i]
+            }))
+            .filter(level => isNumber(level.temp));
+
+        const segments = [];
+        for (let level = 0; level < levels.length - 1; level++) {
+            const measured = slab(levels[level], levels[level + 1]);
+            if (!measured) continue;
+
+            segments.push({
+                from: levels[level].elevation,
+                to: levels[level + 1].elevation,
+                ...measured
+            });
+        }
+
+        // Above the top station the last measured gradient is all we have, so
+        // it is carried upward — separately, so it can be drawn as the guess it
+        // is rather than as another measurement.
+        const above = segments.length
+            ? {
+                from: levels.at(-1).elevation,
+                to: ceiling,
+                rate: segments.at(-1).rate,
+                band: segments.at(-1).band,
+                extrapolated: true
+            }
+            : null;
+
+        const solar = Math.max(
+            ...aggregated.map(station => station[i].solar).filter(isNumber),
+            Number.NEGATIVE_INFINITY
+        );
+
+        const irradiance = Number.isFinite(solar) ? solar : null;
+        const height = sunHeight(time, latitude, longitude);
+        const shade = shadeFraction(irradiance, clearSky(height, time));
+
+        const sunlit = irradiance !== null && irradiance >= THERMAL_SUN;
+
+        // The profile from launch upward. Anything below it is drawn, but it is
+        // not what the bubble climbs through.
+        const aloft = levels.filter(level => level.elevation >= launchElevation - 1);
+        const surface = aloft[0] ?? levels[0];
+
+        const top = sunlit ? thermalTop(aloft, ceiling) : null;
+
+        const lift = top !== null
+            ? updraft(top - surface.elevation, irradiance, surface.temp)
+            : null;
+
+        // Cloud base as a pilot works it out: the spread between temperature
+        // and dew point at the surface, times the rate the two converge.
+        const base = surface && isNumber(surface.dewpt)
+            ? surface.elevation + LCL_PER_DEGREE * Math.max(0, surface.temp - surface.dewpt)
+            : null;
+
+        const rain = aggregated.map(station => station[i].precipRate).filter(isNumber);
+        const pressure = pressures && isNumber(pressures[i].pressure) ? pressures[i].pressure : null;
+
+        columns.push({
+            time,
+            levels,
+            segments,
+            above,
+            thermalTop: top,
+            cloudBase: base !== null && base < ceiling ? base : null,
+            shade,
+            lift,
+            pressure,
+            rain: rain.length ? Math.max(...rain) : null,
+            clouds: levels.length ? cloudBands(levels, floor, levels.at(-1).elevation) : []
+        });
+    }
+
+    return {
+        dayStart,
+        lastTime,
+        floor,
+        ground,
+        ceiling,
+        // The station's own clock, so the hours along the bottom read as the
+        // hours a pilot would be flying rather than as UTC.
+        offset: charted[0].day.offset,
+        launch: {...launch.station, elevation: launchElevation},
+        stations: charted.map(entry => ({
+            ...entry.station,
+            elevation: entry.elevationFeet * FEET,
+            elevationFeet: entry.elevationFeet
+        })),
+        latitude,
+        longitude,
+        columns,
+        isotherms: isotherms(columns, ceiling)
+    };
+}
+
+/**
+ * The temperature contours across the drawing.
+ *
+ * One polyline per five degrees, each tracing the height at which the air is
+ * that temperature. They break wherever a column cannot answer, so a gap in the
+ * readings leaves a gap in the contour rather than a line ruled across it.
+ *
+ * @param {Object[]} columns - The built columns
+ * @param {number} ceiling - The top of the drawing, in metres
+ * @returns {Object[]} One {value, runs} per contour
+ */
+function isotherms(columns, ceiling) {
+    const temps = columns.flatMap(column => column.levels.map(level => level.temp));
+    if (temps.length < 2) return [];
+
+    // The contours have to cover the extrapolated air too, which is colder than
+    // anything measured, so the range is taken from the top of the drawing
+    // rather than from the readings alone.
+    const coldest = Math.min(...columns.map(column => {
+        const level = column.levels.at(-1);
+        const above = column.above;
+        if (!level || !above) return level?.temp ?? Infinity;
+
+        // The rate is per 1000 ft and negative when cooling with height.
+        return level.temp + above.rate * ((ceiling - level.elevation) / FEET) / 1000;
+    }).filter(Number.isFinite));
+
+    const low = Math.ceil(Math.min(coldest, Math.min(...temps)) / ISOTHERM_STEP) * ISOTHERM_STEP;
+    const high = Math.floor(Math.max(...temps) / ISOTHERM_STEP) * ISOTHERM_STEP;
+
+    const lines = [];
+
+    for (let value = low; value <= high; value += ISOTHERM_STEP) {
+        const runs = [];
+        let run = [];
+
+        columns.forEach(column => {
+            const height = heightAtTemperature(column.levels, value, ceiling);
+
+            if (height === null) {
+                if (run.length > 1) runs.push(run);
+                run = [];
+                return;
+            }
+
+            run.push({time: column.time, elevation: height});
+        });
+
+        if (run.length > 1) runs.push(run);
+        if (runs.length) lines.push({value, runs});
+    }
+
+    return lines;
+}

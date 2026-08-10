@@ -1,5 +1,6 @@
 import {SERIES} from './config/series.js';
 import {nearestIndex} from './lib/series-time.js';
+import {reveal} from './lib/reveal.js';
 
 /**
  * The day's readings, drawn.
@@ -743,7 +744,7 @@ export class Chart {
         });
 
         this.valueLayer.innerHTML = markup;
-        this.readout.hidden = false;
+        reveal(this.readout, true);
     }
 
     /**
@@ -810,6 +811,6 @@ export class Chart {
      * @returns {void}
      */
     hideReadout() {
-        if (this.readout) this.readout.hidden = true;
+        reveal(this.readout, false);
     }
 }
