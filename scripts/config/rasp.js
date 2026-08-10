@@ -72,7 +72,7 @@ export const BARB_SPACING = 26;
  * busiest line on the drawing. The rule stays at the true elevation; only the
  * barb is lifted clear of it.
  */
-export const BARB_OFFSET_FEET = 300;
+export const BARB_OFFSET_FEET = 500;
 
 /**
  * The strips above the altitude panel, top to bottom, exactly as the RASP

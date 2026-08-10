@@ -3,7 +3,7 @@ import {
 } from './config/rasp.js';
 import {LAPSE} from './config/bands.js';
 import {FEET} from './rasp.js';
-import {barbPath, CALM} from './lib/barb.js';
+import {barbPath} from './lib/barb.js';
 import {escape} from './lib/markup.js';
 
 /**
@@ -531,13 +531,9 @@ export class Windgram {
                 const y = this.y(level.elevation + lift);
                 const at = `${x.toFixed(1)} ${y.toFixed(1)}`;
 
-                if (level.windSpeed < CALM) {
-                    marks.push({calm: true, x: x.toFixed(1), y: y.toFixed(1)});
-                    return;
-                }
-
                 // The shaft is drawn pointing up and turned to the bearing the
-                // wind is coming from, which is what the reading names.
+                // wind is coming from, which is what the reading names. A calm
+                // still gets one: a bare shaft is the mark for no wind.
                 marks.push({
                     d: barbPath(level.windSpeed),
                     transform: `translate(${at}) rotate(${level.windDir.toFixed(0)})`
@@ -549,9 +545,8 @@ export class Windgram {
          * @param {string} kind - The class suffix, halo or nothing
          * @returns {string} Every mark drawn in one pass
          */
-        const pass = kind => marks.map(mark => mark.calm
-            ? `<circle class="windgram-calm${kind}" cx="${mark.x}" cy="${mark.y}" r="2.6"></circle>`
-            : `<path class="windgram-barb${kind}" d="${mark.d}" transform="${mark.transform}"></path>`
+        const pass = kind => marks.map(mark =>
+            `<path class="windgram-barb${kind}" d="${mark.d}" transform="${mark.transform}"></path>`
         ).join('');
 
         // Every halo first, then every barb: drawn barb by barb, one mark's
@@ -715,7 +710,7 @@ export class Windgram {
 
         const sentences = [
             `Local lapse rate in ºC per 1000 ft. Wind barbs in km/h. Time${zone}.`,
-            'Blue hatching is air within half a degree of its dew point; grey hatching is air no station was reporting from. Barbs sit 300 ft above their station so they clear its line.',
+            'Blue hatching is air within half a degree of its dew point; grey hatching is air no station was reporting from. Barbs sit 500 ft above their station so they clear its line.',
             `* Shade is how much of the clear-sky sunlight is missing — cloud, haze, smoke or terrain. Lift is worked out from that and the measured profile, not sensed, with thermals released from ${launch}. Air above ${top} is extrapolated.`
         ];
 

@@ -3,7 +3,7 @@ import {SERIES} from '../scripts/config/series.js';
 import {History} from '../scripts/history.js';
 import {buildWindgram, FEET} from '../scripts/rasp.js';
 import {Windgram} from '../scripts/windgram.js';
-import {barbCounts, barbPath, CALM} from '../scripts/lib/barb.js';
+import {barbCounts, barbPath, MAXIMUM} from '../scripts/lib/barb.js';
 import {sunHeight, clearSky, shadeFraction} from '../scripts/lib/solar.js';
 import {temperatureAt, thermalTop, updraft, DRY_ADIABAT} from '../scripts/lib/thermal.js';
 import {CEILING, COLUMN_MS, STRIPS} from '../scripts/config/rasp.js';
@@ -114,47 +114,71 @@ function profile(lower, upper) {
 }
 
 describe('wind barbs', () => {
-    it('says nothing at all for a calm', () => {
-        equal(barbPath(0), '');
-        equal(barbPath(CALM - 0.1), '');
+    // The scale, written out exactly as it is read off the drawing.
+    const SCALE = [
+        [0, 0, 0, 'no barb at all'],
+        [5, 0, 1, 'a half barb'],
+        [10, 1, 0, 'a full barb'],
+        [15, 1, 1, 'a full barb and a half'],
+        [20, 2, 0, 'two full barbs'],
+        [25, 2, 1, 'two full barbs and a half'],
+        [30, 3, 0, 'three full barbs']
+    ];
+
+    SCALE.forEach(([speed, feathers, halves, notation]) => {
+        it(`draws ${notation} for ${speed} km/h`, () => {
+            equal(barbCounts(speed), {feathers, halves});
+        });
     });
 
-    it('draws a half feather for five', () => {
-        equal(barbCounts(5), {pennants: 0, feathers: 0, halves: 1});
-    });
-
-    it('draws a full feather for ten', () => {
-        equal(barbCounts(10), {pennants: 0, feathers: 1, halves: 0});
-    });
-
-    it('draws a feather and a half for fifteen', () => {
-        equal(barbCounts(15), {pennants: 0, feathers: 1, halves: 1});
-    });
-
-    it('draws two feathers for twenty', () => {
-        equal(barbCounts(20), {pennants: 0, feathers: 2, halves: 0});
-    });
-
-    it('draws a pennant for fifty', () => {
-        equal(barbCounts(50), {pennants: 1, feathers: 0, halves: 0});
-    });
-
-    it('draws a pennant, two feathers and a half for seventy-five', () => {
-        equal(barbCounts(75), {pennants: 1, feathers: 2, halves: 1});
+    it('stops at three full barbs, which means thirty or more', () => {
+        [30, 35, 60, 120].forEach(speed => {
+            equal(barbCounts(speed), {feathers: 3, halves: 0}, `${speed} km/h`);
+        });
     });
 
     it('rounds to the nearest five, because there is no mark for seven', () => {
         equal(barbCounts(7), barbCounts(5));
         equal(barbCounts(8), barbCounts(10));
+        equal(barbCounts(2), barbCounts(0));
+        equal(barbCounts(3), barbCounts(5));
     });
 
-    it('closes the pennant so it fills as a triangle', () => {
-        ok(barbPath(50).includes('Z'), 'the pennant is a closed path');
-        ok(!barbPath(20).includes('Z'), 'feathers are open lines');
+    it('rounds half a step up, as arithmetic does', () => {
+        equal(barbCounts(2.5), barbCounts(5));
+        equal(barbCounts(12.5), barbCounts(15));
     });
 
-    it('always draws the shaft', () => {
-        ok(barbPath(5).startsWith('M0 0L0 -'));
+    it('draws a bare shaft for a calm', () => {
+        // No feather means no wind, so there is exactly one line and no more.
+        equal(barbPath(0), 'M0 0L0 -21');
+    });
+
+    it('always draws the shaft, whatever the speed', () => {
+        [0, 5, 15, 30, 90].forEach(speed => {
+            ok(barbPath(speed).startsWith('M0 0L0 -'), `${speed} km/h has a shaft`);
+        });
+    });
+
+    it('draws one stroke per feather, on top of the shaft', () => {
+        // Each mark is its own subpath, so counting moves counts marks.
+        const strokes = speed => barbPath(speed).split('M').length - 1;
+
+        equal(strokes(0), 1, 'shaft only');
+        equal(strokes(5), 2, 'shaft and a half feather');
+        equal(strokes(20), 3, 'shaft and two feathers');
+        equal(strokes(25), 4, 'shaft, two feathers and a half');
+        equal(strokes(MAXIMUM), 4, 'shaft and three feathers');
+    });
+
+    it('has no pennant at any speed', () => {
+        // A closed subpath would be a pennant; the scale stops before one.
+        [30, 50, 100].forEach(speed => ok(!barbPath(speed).includes('Z'), `${speed} km/h`));
+    });
+
+    it('steps a lone half feather in off the tail, so it cannot read as a full one', () => {
+        ok(!barbPath(5).includes('M0 -21.0L'), 'the half is not in the end slot');
+        ok(barbPath(10).includes('M0 -21.0L'), 'a full feather is');
     });
 });
 
