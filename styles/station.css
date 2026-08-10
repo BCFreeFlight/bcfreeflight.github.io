@@ -309,47 +309,67 @@ a { color: var(--accent); }
 }
 
 /* --- Wind ----------------------------------------------------------------
-   The headline reading, so it is bigger than the rest — but it is a sentence
-   with a picture, not an instrument to be read off. */
+   Two tiles, side by side: which way it is blowing, and how hard. They are the
+   readings someone came to the page for, so they are larger than the rest and
+   sit above them — but they are two separate answers, and reading one should
+   not mean picking it out of the other. */
+
+.wind-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: .75rem;
+    margin-top: 1.25rem;
+}
 
 .wind-card {
     display: flex;
-    align-items: center;
-    gap: clamp(1rem, 4vw, 2.5rem);
-    margin-top: 1.25rem;
-    padding: clamp(1.1rem, 3vw, 1.75rem);
+    flex-direction: column;
+    padding: clamp(1.1rem, 3vw, 1.5rem);
     border: 1px solid var(--rule);
     border-radius: 12px;
     background: var(--surface);
     box-shadow: var(--shadow);
 }
 
-.wind-dial {
-    flex: none;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: .1rem;
+/* The same glyph the live page uses, turned to the wind. */
+.wind-arrow {
+    align-self: center;
+    margin: .6rem 0 .2rem;
+    font-family: "Material Symbols Outlined", sans-serif;
+    /* Matches the instance the page loads, and the live page's own arrow. */
+    font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 48;
+    font-size: clamp(3.25rem, 9vw, 4.5rem);
+    line-height: 1;
+    color: var(--accent);
+    -webkit-font-smoothing: antialiased;
 }
 
-.windsock {
-    width: clamp(88px, 15vw, 128px);
-    height: auto;
-}
-
-/* The direction the sock is pointing, named. The full wording stays on the
-   graphic's label for anyone using a screen reader. */
+/* The direction, named. The full wording stays on the arrow's label for anyone
+   using a screen reader. */
 .wind-cardinal {
+    align-self: center;
     margin: 0;
-    font-size: 1.5rem;
+    font-size: clamp(2rem, 6vw, 2.75rem);
     font-weight: 700;
-    letter-spacing: .02em;
+    line-height: 1;
+    letter-spacing: .01em;
 }
 
-.wind-body { min-width: 0; }
+/* Both tiles are the same height, so the figure sits where the arrow does
+   rather than floating at the top of an empty box — and it is centred to match
+   it, so the two tiles read as a pair rather than two different layouts. */
+.wind-card--speed {
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+}
+
+/* The label stays on the left in both tiles, where the readouts below keep
+   theirs. Only the figures are centred. */
+.wind-card--speed .label { align-self: stretch; text-align: left; }
 
 .wind-speed {
-    margin: .3rem 0 0;
+    margin: .5rem 0 0;
     font-size: clamp(2.75rem, 8vw, 4rem);
     font-weight: 700;
     line-height: 1;
@@ -744,10 +764,7 @@ a { color: var(--accent); }
 
     .tab-meta { font-size: .75rem; }
 
-    .wind-card {
-        gap: 1rem;
-        padding: 1.1rem;
-    }
+    .wind-card { padding: 1.1rem; }
 
     /* The chart needs the width more than the card needs its margins. */
     .trend { padding: .9rem .6rem 1rem; }

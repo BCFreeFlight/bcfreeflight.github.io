@@ -69,6 +69,10 @@ export function lapsePairs(entries) {
             group: 'lapse',
             on: true,
             digits: 2,
+            // Drawn upside down: a lapse rate is negative when the air cools
+            // with height, and that is the condition worth flying, so it reads
+            // better climbing the panel than falling down it.
+            invert: true,
             upper,
             lower,
             gap
