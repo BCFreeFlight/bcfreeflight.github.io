@@ -417,6 +417,263 @@ a { color: var(--accent); }
     color: var(--ink-muted);
 }
 
+/* --- Today's trend --------------------------------------------------------
+   The day behind the readings above. Chips choose what is drawn; the layout
+   buttons choose whether each measurement gets its own panel or they are all
+   laid over one another. */
+
+.trend {
+    margin-top: .75rem;
+    padding: 1rem 1.1rem 1.1rem;
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    background: var(--surface);
+}
+
+.trend-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: .6rem 1rem;
+}
+
+/* A pair of buttons that read as one control, so the choice between them is
+   obvious without a label explaining it. */
+.trend-modes {
+    display: flex;
+    border: 2px solid var(--rule-strong);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.trend-mode {
+    appearance: none;
+    padding: .3rem .85rem;
+    border: none;
+    background: var(--surface);
+    font: inherit;
+    font-size: .8125rem;
+    font-weight: 700;
+    color: var(--ink-muted);
+    cursor: pointer;
+    transition: background-color .15s, color .15s;
+}
+
+.trend-mode:hover:not([aria-pressed="true"]) { background: var(--accent-soft); color: var(--accent); }
+
+.trend-mode[aria-pressed="true"] { background: var(--accent); color: #fff; cursor: default; }
+
+.trend-controls {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+}
+
+/* --- Measurement picker ---------------------------------------------------
+   A dozen measurements is too many to line the top of the card with, so they
+   live in a list that opens on demand. The colours come with them: the swatch
+   beside a name is the colour its line is drawn in. */
+
+.trend-picker { position: relative; }
+
+.trend-picker-toggle {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    padding: .3rem .6rem .3rem .85rem;
+    border: 2px solid var(--rule-strong);
+    border-radius: 999px;
+    background: var(--surface);
+    font: inherit;
+    font-size: .8125rem;
+    font-weight: 700;
+    color: var(--ink);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: border-color .15s, color .15s;
+}
+
+.trend-picker-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+.trend-picker-toggle[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+
+.trend-count {
+    font-weight: 600;
+    color: var(--ink-faint);
+}
+
+.trend-caret {
+    font-family: "Material Symbols Outlined", sans-serif;
+    font-size: 1.1rem;
+    line-height: 1;
+    transition: transform .15s;
+}
+
+.trend-picker-toggle[aria-expanded="true"] .trend-caret { transform: rotate(180deg); }
+
+.trend-menu {
+    position: absolute;
+    top: calc(100% + .4rem);
+    right: 0;
+    z-index: 5;
+    width: max-content;
+    min-width: 15rem;
+    max-width: min(20rem, 85vw);
+    max-height: 60vh;
+    overflow-y: auto;
+    padding: .35rem;
+    border: 1px solid var(--rule-strong);
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: var(--shadow), 0 12px 32px -12px rgba(22, 32, 43, .35);
+}
+
+.trend-menu[hidden] { display: none; }
+
+.trend-menu-actions {
+    display: flex;
+    gap: .35rem;
+    padding: .15rem .15rem .4rem;
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: .3rem;
+}
+
+.trend-bulk {
+    appearance: none;
+    flex: 1 1 0;
+    padding: .3rem .6rem;
+    border: 1px solid var(--rule-strong);
+    border-radius: 8px;
+    background: var(--surface);
+    font: inherit;
+    font-size: .75rem;
+    font-weight: 700;
+    color: var(--ink-muted);
+    cursor: pointer;
+    transition: border-color .15s, color .15s;
+}
+
+.trend-bulk:hover { border-color: var(--accent); color: var(--accent); }
+
+.trend-option {
+    appearance: none;
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+    width: 100%;
+    padding: .4rem .5rem;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    font: inherit;
+    font-size: .875rem;
+    font-weight: 600;
+    text-align: left;
+    color: var(--ink-muted);
+    cursor: pointer;
+    transition: background-color .12s, color .12s;
+}
+
+.trend-option:hover { background: var(--surface-soft); color: var(--ink); }
+
+.trend-option[aria-pressed="true"] { color: var(--ink); }
+
+.trend-option-label { flex: 1 1 auto; }
+
+/* Off is the same colour, drained: the line's identity does not change when
+   it is hidden, only whether it is drawn. */
+.trend-swatch {
+    flex: none;
+    width: .7rem;
+    height: .7rem;
+    border-radius: 3px;
+    background: var(--series, var(--rule-strong));
+    opacity: .25;
+    transition: opacity .12s;
+}
+
+.trend-option[aria-pressed="true"] .trend-swatch { opacity: 1; }
+
+.trend-tick {
+    flex: none;
+    font-family: "Material Symbols Outlined", sans-serif;
+    font-size: 1.05rem;
+    line-height: 1;
+    color: var(--accent);
+    opacity: 0;
+}
+
+.trend-option[aria-pressed="true"] .trend-tick { opacity: 1; }
+
+.chart-host {
+    position: relative;
+    margin-top: .9rem;
+    /* The crosshair is read by pointer, and on a phone that means a finger:
+       let it track without the page scrolling out from under it. */
+    touch-action: pan-y;
+}
+
+.chart-svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+.chart-line { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+
+.chart-band { fill: rgba(22, 32, 43, .04); }
+
+.chart-grid { stroke: var(--rule); stroke-width: 1; }
+
+.chart-zero { stroke: var(--rule-strong); stroke-width: 1.4; }
+
+.chart-baseline { stroke: var(--rule-strong); stroke-width: 1; }
+
+.chart-axis {
+    font-size: 10.5px;
+    font-weight: 500;
+    fill: var(--ink-faint);
+}
+
+.chart-unit {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .02em;
+    fill: var(--ink-faint);
+}
+
+.chart-key { font-size: 11px; font-weight: 600; fill: var(--ink-muted); }
+
+.chart-key-swatch { rx: 2; }
+
+.chart-crosshair { stroke: var(--ink); stroke-width: 1; opacity: .55; }
+
+.chart-readout-time { font-size: 11px; font-weight: 700; fill: var(--ink); }
+
+/* A halo, so a value stays legible where it lands on top of its own line. */
+.chart-readout-value {
+    font-size: 11.5px;
+    font-weight: 700;
+    paint-order: stroke;
+    stroke: var(--surface);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+}
+
+.chart-readout-dot { stroke: var(--surface); stroke-width: 1.5; }
+
+.chart-empty {
+    margin: 0;
+    padding: 2rem 0;
+    text-align: center;
+    color: var(--ink-faint);
+}
+
+.trend-note {
+    margin: .7rem 0 0;
+    font-size: .8125rem;
+    line-height: 1.4;
+    color: var(--ink-muted);
+}
+
 /* --- States --------------------------------------------------------------- */
 
 .state {
@@ -491,6 +748,23 @@ a { color: var(--accent); }
         gap: 1rem;
         padding: 1.1rem;
     }
+
+    /* The chart needs the width more than the card needs its margins. */
+    .trend { padding: .9rem .6rem 1rem; }
+
+    .trend-head { padding: 0 .4rem; }
+
+    /* The picker and the layout buttons take a line each rather than being
+       squeezed onto one on a phone. */
+    .trend-controls { width: 100%; justify-content: space-between; }
+
+    .trend-menu { max-width: min(20rem, 78vw); }
+
+    .trend-note { padding: 0 .4rem; font-size: .78125rem; }
+
+    .chart-axis, .chart-unit { font-size: 9.5px; }
+
+    .chart-key { font-size: 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

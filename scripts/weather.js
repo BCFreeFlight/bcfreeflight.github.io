@@ -1,3 +1,7 @@
+// Weather Underground's public PWS key. Shared with the history reader so the
+// two callers cannot drift apart.
+export const WU_API_KEY = "6dfb9fed05d24b71bb9fed05d20b715d";
+
 /**
  * Class for handling Weather Underground API interactions
  */
@@ -86,8 +90,7 @@ export class WeatherUnderground {
      * @private
      */
     async _fetchWeatherData(location) {
-        const apiKey = "6dfb9fed05d24b71bb9fed05d20b715d";
-        const apiUrl = `https://api.weather.com/v2/pws/observations/current?stationId=${location}&format=json&units=h&numericPrecision=decimal&apiKey=${apiKey}`;
+        const apiUrl = `https://api.weather.com/v2/pws/observations/current?stationId=${location}&format=json&units=h&numericPrecision=decimal&apiKey=${WU_API_KEY}`;
         try {
             const response = await fetch(apiUrl);
             if (!response.ok) {
