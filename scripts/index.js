@@ -5,9 +5,6 @@ import youtube from './youtube.js';
 import trends from './trends.js';
 import * as readings from './readings.js';
 
-// Speed at which the windsock reads fully extended, in km/h.
-const WINDSOCK_FULL = 20;
-
 // Camera status costs a hidden player to check, so it lags the readings.
 const CAMERA_CHECK_MS = 5 * 60 * 1000;
 
@@ -21,61 +18,21 @@ const NO_READING = readings.NO_READING;
  */
 export class Index {
     /**
-     * A windsock, pointing the way the wind is going.
+     * An arrow, pointing the way the wind is going.
      *
-     * It stands on its own rather than on a compass dial: the direction is
-     * written out in words beside it, so the picture only has to show which way
-     * the wind blows, not let anyone measure a bearing off it. The sock fills
-     * out with speed too, limp when calm and streaming by WINDSOCK_FULL.
+     * The same glyph the live page uses, at the same rotation: the reading
+     * names the direction the wind blows *from*, so the arrow points 180
+     * degrees away from it. A windsock read well to anyone who has stood under
+     * one and not at all to anyone who has not — an arrow needs no explaining,
+     * and the direction is written out beneath it either way.
      *
      * @param {Object} wind - A shared wind reading: cardinal, rotation, words
-     * @param {?number} windSpeed - Wind speed in km/h
-     * @returns {string} SVG markup
+     * @returns {string} HTML markup
      */
-    renderWindsock(wind, windSpeed) {
-        const cx = 120, cy = 120;
-        const rotation = wind.rotation;
-        const fullLength = 150;
-
-        // Fraction of full extension, so a calm sock reads as a stubby cone.
-        const extension = 0.42 + 0.58 * Math.min((windSpeed ?? 0) / WINDSOCK_FULL, 1);
-        const length = fullLength * extension;
-
-        // Straddle the hub, so a short sock stays centred instead of drifting upwind.
-        const mouthY = cy + length / 2;
-
-        const mouthHalf = 26;
-        const tailHalf = 10;
-        const bandCount = 5;
-
-        const at = step => {
-            const t = step / bandCount;
-            return {
-                y: mouthY - length * t,
-                half: mouthHalf + (tailHalf - mouthHalf) * t
-            };
-        };
-
-        let bands = '';
-        for (let i = 0; i < bandCount; i++) {
-            const from = at(i);
-            const to = at(i + 1);
-            bands += `<path d="M${cx - from.half} ${from.y} L${cx + from.half} ${from.y}
-                               L${cx + to.half} ${to.y} L${cx - to.half} ${to.y} Z"
-                            fill="${i % 2 === 0 ? '#ee6a10' : '#ffffff'}"
-                            stroke="#16202b" stroke-opacity=".35" stroke-width="1"
-                            stroke-linejoin="round"/>`;
-        }
-
-        return `
-            <svg class="windsock" viewBox="0 0 240 240" role="img"
-                 aria-label="Wind from the ${wind.cardinalWords ?? 'unknown direction'}">
-                <g style="transform: rotate(${rotation}deg); transform-origin: ${cx}px ${cy}px;">
-                    ${bands}
-                    <ellipse cx="${cx}" cy="${mouthY}" rx="${mouthHalf}" ry="6"
-                             fill="#ee6a10" stroke="#16202b" stroke-opacity=".35" stroke-width="1"/>
-                </g>
-            </svg>`;
+    renderWindArrow(wind) {
+        return `<span class="wind-arrow" role="img"
+                      aria-label="Wind from the ${wind.cardinalWords ?? 'unknown direction'}"
+                      style="transform: rotate(${wind.rotation}deg);">navigation</span>`;
     }
 
     /**
@@ -210,19 +167,21 @@ export class Index {
     renderStationView(entry) {
         const observation = entry.observation;
         const key = entry.station.key;
-        const uk = observation.uk_hybrid ?? {};
         const wind = readings.wind(observation);
 
         return `
             <div class="view" id="panel-${key}" role="tabpanel" tabindex="0"
                  aria-labelledby="tab-${key}" data-view="${key}" hidden>
-                <section class="wind-card">
-                    <div class="wind-dial">
-                        ${this.renderWindsock(wind, uk.windSpeed)}
-                        <p class="wind-cardinal">${wind.cardinal}</p>
-                    </div>
+                <div class="wind-row">
+                    <section class="wind-card wind-card--direction">
+                        <span class="label"><span class="label-icon" aria-hidden="true">explore</span>Wind direction</span>
 
-                    <div class="wind-body">
+                        ${this.renderWindArrow(wind)}
+
+                        <p class="wind-cardinal">${wind.cardinal}</p>
+                    </section>
+
+                    <section class="wind-card wind-card--speed">
                         <span class="label"><span class="label-icon" aria-hidden="true">air</span>Wind</span>
 
                         <p class="wind-speed">${wind.speed}<span class="unit">km/h</span></p>
@@ -230,8 +189,8 @@ export class Index {
                         ${wind.gusting
                             ? `<p class="wind-gust">Gusting to <strong>${wind.gust} km/h</strong></p>`
                             : ''}
-                    </div>
-                </section>
+                    </section>
+                </div>
 
                 ${this.renderReadouts(observation, entry.metrics)}
                 ${trends.render(entry.station)}
