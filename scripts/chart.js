@@ -755,6 +755,24 @@ export class Chart {
      * @param {string} anchor - Text anchor, start or end
      * @returns {string} SVG markup
      */
+    /**
+     * One reading, written the way that measurement is read.
+     *
+     * Most are a number and a unit. A bearing is not: "224.0 º" has to be
+     * converted back into a direction before it means anything, and the rest of
+     * the site — the tile, the arrows, the compass down the side of this very
+     * panel — all say WSW. A series says so by carrying its own `format`.
+     *
+     * @param {number} value - The reading
+     * @param {Object} series - Its series definition
+     * @returns {string} The reading, as words
+     */
+    readingText(value, series) {
+        if (series.format) return series.format(value);
+
+        return `${value.toFixed(series.digits ?? 1)}${series.unit ? ` ${series.unit}` : ''}`;
+    }
+
     renderPlotValues(plot, index, x, anchor) {
         const entries = plot.series
             .map(series => {
@@ -764,7 +782,7 @@ export class Chart {
                 return {
                     series,
                     y: this.y(value, series, plot),
-                    text: `${value.toFixed(series.digits ?? 1)}${series.unit ? ` ${series.unit}` : ''}`
+                    text: this.readingText(value, series)
                 };
             })
             .filter(Boolean)

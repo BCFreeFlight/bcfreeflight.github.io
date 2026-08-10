@@ -1,3 +1,5 @@
+import {pointAt} from './compass.js';
+
 /**
  * The measurements available to chart, in the order they are offered.
  *
@@ -71,6 +73,10 @@ export const SERIES = [
         // Fixed to the whole compass: an auto-fitted axis makes a steady wind
         // look like it is swinging wildly.
         domain: [0, 360],
+        // Read out as a compass point rather than a bearing. Everywhere else on
+        // the site a direction is WSW; only here was it 224.0 º, which has to
+        // be converted in the reader's head before it means anything.
+        format: value => pointAt(value).abbr,
         read: row => row.winddirAvg
     },
     {
