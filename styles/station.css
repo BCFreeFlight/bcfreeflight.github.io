@@ -219,6 +219,15 @@ a { color: var(--blue); }
 
 /* --- Lapse rate on the tab bar -------------------------------------------- */
 
+/* The unit sits with the heading rather than on every row, so each figure
+   stays uncluttered while the maths is still stated once. */
+.label-unit {
+    font-weight: 400;
+    letter-spacing: .06em;
+    text-transform: none;
+    color: var(--ink-faint);
+}
+
 .lapse-tag { padding-bottom: .5rem; }
 
 .lapse-segments {

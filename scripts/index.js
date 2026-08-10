@@ -127,7 +127,7 @@ export class Index {
 
             return `
                 <div class="lapse-tag">
-                    <span class="label">Lapse rate</span>
+                    <span class="label">Lapse rate <span class="label-unit">(ºC/1000 ft)</span></span>
                     <p class="lapse-sub">${
                         offline.length ? `${offline.join(' and ')} offline` : 'Needs two stations reporting'
                     }</p>
@@ -136,7 +136,7 @@ export class Index {
 
         return `
             <div class="lapse-tag">
-                <span class="label">Lapse rate</span>
+                <span class="label">Lapse rate <span class="label-unit">(ºC/1000 ft)</span></span>
                 <div class="lapse-segments">
                     ${segments.map(segment => `
                         <div class="lapse-segment" title="${segment.name}: ${segment.description}">
