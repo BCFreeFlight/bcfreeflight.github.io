@@ -310,10 +310,26 @@ a { color: var(--accent); }
     box-shadow: var(--shadow);
 }
 
-.windsock {
+.wind-dial {
     flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: .1rem;
+}
+
+.windsock {
     width: clamp(88px, 15vw, 128px);
     height: auto;
+}
+
+/* The direction the sock is pointing, named. The full wording stays on the
+   graphic's label for anyone using a screen reader. */
+.wind-cardinal {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: .02em;
 }
 
 .wind-body { min-width: 0; }
@@ -334,15 +350,13 @@ a { color: var(--accent); }
     margin-left: .4em;
 }
 
-.wind-gust,
-.wind-from {
+.wind-gust {
     margin: .35rem 0 0;
     font-size: 1.0625rem;
     color: var(--ink-muted);
 }
 
-.wind-gust strong,
-.wind-from strong { color: var(--ink); font-weight: 700; }
+.wind-gust strong { color: var(--ink); font-weight: 700; }
 
 /* --- Readouts ------------------------------------------------------------- */
 

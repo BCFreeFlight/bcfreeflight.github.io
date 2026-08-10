@@ -216,7 +216,10 @@ export class Index {
             <div class="view" id="panel-${key}" role="tabpanel" tabindex="0"
                  aria-labelledby="tab-${key}" data-view="${key}" hidden>
                 <section class="wind-card">
-                    ${this.renderWindsock(wind, uk.windSpeed)}
+                    <div class="wind-dial">
+                        ${this.renderWindsock(wind, uk.windSpeed)}
+                        <p class="wind-cardinal">${wind.cardinal}</p>
+                    </div>
 
                     <div class="wind-body">
                         <span class="label"><span class="label-icon" aria-hidden="true">air</span>Wind</span>
@@ -226,9 +229,6 @@ export class Index {
                         ${wind.gusting
                             ? `<p class="wind-gust">Gusting to <strong>${wind.gust} km/h</strong></p>`
                             : ''}
-
-                        <p class="wind-from">Blowing from the
-                            <strong>${wind.cardinalWords ?? NO_READING}</strong></p>
                     </div>
                 </section>
 
