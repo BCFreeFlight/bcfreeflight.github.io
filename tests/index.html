@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tests — BC Free Flight</title>
+    <style>
+        :root { color-scheme: light dark; }
+
+        body {
+            margin: 0;
+            padding: 1.5rem;
+            font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        }
+
+        h1 { font-size: 1.2rem; margin: 0 0 .25rem; }
+
+        h2 {
+            font-size: .8rem;
+            text-transform: uppercase;
+            letter-spacing: .08em;
+            margin: 1.5rem 0 .35rem;
+            opacity: .6;
+        }
+
+        #summary {
+            display: inline-block;
+            margin-bottom: 1rem;
+            padding: .35rem .75rem;
+            border-radius: 999px;
+            font-weight: 700;
+        }
+
+        .pass { color: #0a7a2f; }
+        .fail { color: #b00020; }
+
+        #summary.pass { background: #e6f5ec; }
+        #summary.fail { background: #fdeaec; }
+
+        section > div { padding-left: 1rem; }
+
+        pre {
+            margin: .25rem 0 .5rem 1rem;
+            padding: .5rem .75rem;
+            border-left: 3px solid #b00020;
+            background: rgba(176, 0, 32, .06);
+            white-space: pre-wrap;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            body { background: #14181d; color: #dfe3e8; }
+            .pass { color: #5fd18a; }
+            .fail { color: #ff8b9a; }
+            #summary.pass { background: rgba(95, 209, 138, .12); }
+            #summary.fail { background: rgba(255, 139, 154, .12); }
+        }
+    </style>
+</head>
+<body>
+<h1>BC Free Flight — tests</h1>
+<div id="summary">running…</div>
+<div id="output"></div>
+
+<script type="module">
+    // Every suite is imported before anything runs, so the page reports one
+    // total rather than a count that climbs as files arrive.
+    import './lib.test.js';
+    import './weather.test.js';
+    import './chart.test.js';
+    import './api.test.js';
+    import './pages.test.js';
+
+    import {run} from './runner.js';
+
+    await run();
+</script>
+</body>
+</html>

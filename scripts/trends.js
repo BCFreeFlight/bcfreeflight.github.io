@@ -1,4 +1,7 @@
-import history, {SERIES} from './history.js';
+import history from './history.js';
+import {SERIES} from './config/series.js';
+import {STORAGE_KEYS} from './config/defaults.js';
+import {readJson, writeJson} from './lib/storage.js';
 import {Chart} from './chart.js';
 import {lapsePairs, lapseColumn} from './lapse-series.js';
 
@@ -17,45 +20,13 @@ import {lapsePairs, lapseColumn} from './lapse-series.js';
  * buckets change, so switching tabs costs nothing.
  */
 
-const SELECTION_KEY = 'trend_series';
-const MODE_KEY = 'trend_mode';
-
-/**
- * Reads a remembered preference, tolerating a blocked or full localStorage.
- * @param {string} key - Storage key
- * @param {*} fallback - Value to use when nothing is stored
- * @returns {*} The stored value, or the fallback
- */
-function remembered(key, fallback) {
-    try {
-        const stored = localStorage.getItem(key);
-        return stored === null ? fallback : JSON.parse(stored);
-    } catch (error) {
-        return fallback;
-    }
-}
-
-/**
- * Stores a preference, ignoring failures so a private-mode browser still works.
- * @param {string} key - Storage key
- * @param {*} value - Value to store
- * @returns {void}
- */
-function remember(key, value) {
-    try {
-        localStorage.setItem(key, JSON.stringify(value));
-    } catch (error) {
-        // A preference that cannot be saved is not worth interrupting the page for.
-    }
-}
-
 export class Trends {
     constructor() {
         this.panels = new Map();
         this.days = new Map();
         this.pairs = [];
-        this.selected = remembered(SELECTION_KEY, null);
-        this.mode = remembered(MODE_KEY, 'split');
+        this.selected = readJson(STORAGE_KEYS.trendSeries, null);
+        this.mode = readJson(STORAGE_KEYS.trendMode, 'split');
     }
 
     /**
@@ -220,7 +191,7 @@ export class Trends {
                     ? this.catalogue().map(series => series.key)
                     : [];
 
-                remember(SELECTION_KEY, this.selected);
+                writeJson(STORAGE_KEYS.trendSeries, this.selected);
                 this.panels.forEach(other => this.apply(other));
                 return;
             }
@@ -232,7 +203,7 @@ export class Trends {
                 ? showing.filter(item => item !== key)
                 : [...showing, key];
 
-            remember(SELECTION_KEY, this.selected);
+            writeJson(STORAGE_KEYS.trendSeries, this.selected);
             this.panels.forEach(other => this.apply(other));
         });
 
@@ -241,7 +212,7 @@ export class Trends {
             if (!button) return;
 
             this.mode = button.dataset.mode;
-            remember(MODE_KEY, this.mode);
+            writeJson(STORAGE_KEYS.trendMode, this.mode);
             this.panels.forEach(other => this.apply(other));
         });
     }

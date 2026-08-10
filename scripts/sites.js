@@ -1,3 +1,9 @@
+import {
+    DEFAULT_CACHE_SECONDS,
+    MINIMUM_REFRESH_SECONDS,
+    REFERENCE_CACHE_SECONDS
+} from './config/defaults.js';
+
 /**
  * Site configuration.
  *
@@ -5,11 +11,6 @@
  * in the app names a station, so adding a site or moving a station is a change
  * to that file alone.
  */
-
-// Falls back when a station does not state its own timeout. The station being
-// watched stays fresh; the ones that only feed lapse rate are cheap to hold.
-const DEFAULT_CACHE_SECONDS = 60;
-const REFERENCE_CACHE_SECONDS = 60 * 30;
 
 const CONFIG_URL = new URL('../sites/sites.json', import.meta.url);
 
@@ -60,6 +61,21 @@ export class Sites {
             name: site.name ?? slug,
             stations: (site.stations ?? []).map((station, index) => this.station(station, index))
         };
+    }
+
+    /**
+     * Every configured site, in the order the configuration lists them.
+     *
+     * The home page is built from this, so adding a site to sites.json puts it
+     * on the front page without anyone editing the markup.
+     *
+     * @returns {Promise<Object[]>} Resolved sites
+     */
+    async all() {
+        const config = await this.load();
+        const slugs = Object.keys(config?.sites ?? {});
+
+        return Promise.all(slugs.map(slug => this.site(slug)));
     }
 
     /**
@@ -152,7 +168,7 @@ export class Sites {
 
         // A floor, so a station configured at a few seconds cannot turn the
         // page into a polling loop.
-        return Math.max(Math.min(...seconds), 30) * 1000;
+        return Math.max(Math.min(...seconds), MINIMUM_REFRESH_SECONDS) * 1000;
     }
 
     /**

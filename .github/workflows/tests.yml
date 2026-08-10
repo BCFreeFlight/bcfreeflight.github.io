@@ -1,0 +1,36 @@
+name: Tests
+
+# The site is deployed straight from main by GitHub Pages, so main is
+# production. These run before anything reaches it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: Browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Only used to drive the browser over the DevTools protocol. The site
+      # itself has no build step and no dependencies, and neither do the tests.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The runner image ships Chrome, but say so out loud: a missing browser
+      # should fail here with a clear message rather than inside the runner.
+      - name: Find Chrome
+        run: |
+          which google-chrome || which chromium-browser || which chromium
+          google-chrome --version
+
+      - name: Run the tests
+        run: ./tests/run.sh
+        env:
+          CHROME: google-chrome

@@ -1,4 +1,7 @@
 import weather from './weather.js';
+import {pointAt} from './config/compass.js';
+import {fixed, isNumber} from './lib/numbers.js';
+import {pairByElevation} from './lib/lapse.js';
 
 /**
  * Shared presentation of station readings.
@@ -12,27 +15,6 @@ import weather from './weather.js';
 // Shown wherever a station reports nothing for a field.
 export const NO_READING = '—';
 
-// Compass points written out. "SSW" is jargon; "south-southwest" is not, and
-// the page has to read for someone who has never seen a wind report.
-const COMPASS_WORDS = {
-    N: 'north',
-    NNE: 'north-northeast',
-    NE: 'northeast',
-    ENE: 'east-northeast',
-    E: 'east',
-    ESE: 'east-southeast',
-    SE: 'southeast',
-    SSE: 'south-southeast',
-    S: 'south',
-    SSW: 'south-southwest',
-    SW: 'southwest',
-    WSW: 'west-southwest',
-    W: 'west',
-    WNW: 'west-northwest',
-    NW: 'northwest',
-    NNW: 'north-northwest'
-};
-
 /**
  * Formats a measurement, or reports its absence.
  * @param {?number} value - The raw reading
@@ -40,9 +22,7 @@ const COMPASS_WORDS = {
  * @returns {string} The fixed-point value, or NO_READING
  */
 export function format(value, digits = 1) {
-    return value === null || value === undefined || Number.isNaN(Number(value))
-        ? NO_READING
-        : Number(value).toFixed(digits);
+    return fixed(value, digits, NO_READING);
 }
 
 /**
@@ -50,8 +30,8 @@ export function format(value, digits = 1) {
  *
  * `cardinal` is the 16-point compass name of the direction the wind blows
  * *from*, so NNW stays NNW rather than collapsing to N. `rotation` is where an
- * arrow or a windsock tail should point: 180 degrees off the cardinal, because
- * the air travels away from the direction it is named for.
+ * arrow should point: 180 degrees off the cardinal, because the air travels
+ * away from the direction it is named for.
  *
  * @param {?Object} observation - A station observation
  * @returns {Object} cardinal, bearing, rotation, speed, gust, summary, gustSummary
@@ -59,22 +39,22 @@ export function format(value, digits = 1) {
 export function wind(observation) {
     const uk = observation?.uk_hybrid ?? {};
     const degrees = observation?.winddir;
-    const known = degrees !== null && degrees !== undefined;
+    const known = isNumber(degrees);
+    const point = known ? pointAt(degrees) : null;
 
-    const cardinal = known ? weather.degreesToDirection(degrees) : NO_READING;
     const speed = format(uk.windSpeed);
     const gust = format(uk.windGust);
     const gusting = gust !== NO_READING && speed !== NO_READING && Number(gust) > Number(speed);
 
     return {
-        cardinal,
-        cardinalWords: known ? COMPASS_WORDS[cardinal] ?? cardinal : null,
+        cardinal: point?.abbr ?? NO_READING,
+        cardinalWords: point?.words ?? null,
         bearing: known ? Math.round(degrees) : null,
         rotation: known ? degrees + 180 : 0,
         speed,
         gust,
         gusting,
-        summary: `${cardinal} ${speed} km/h`,
+        summary: `${point?.abbr ?? NO_READING} ${speed} km/h`,
         // The same wording the weather page uses under its wind figure. When
         // there is nothing gusting there is nothing to report, so the line goes
         // back to naming the reading above it.
@@ -115,37 +95,25 @@ export function precipitationRate(observation) {
 /**
  * Lapse rate for each adjacent pair of stations, highest first.
  *
- * Stations are ordered by the elevation they report rather than by their place
- * in the configuration, so the segments always read downhill: Silver Star to
- * Launch, then Launch to the Landing Zone. A station that is offline drops out
- * and its neighbours pair up, so two live stations still give one segment.
+ * A station that is offline drops out and its neighbours pair up, so two live
+ * stations still give one segment.
  *
  * @param {Object[]} loaded - Station entries from Weather.loadStations
  * @returns {Object[]} One segment per adjacent pair, each with its own wording
  */
 export function lapseSegments(loaded) {
-    const ranked = loaded
-        .filter(entry => entry.online && entry.observation?.uk_hybrid?.elev !== undefined)
-        .sort((a, b) => b.observation.uk_hybrid.elev - a.observation.uk_hybrid.elev);
+    const reporting = loaded.filter(entry =>
+        entry.online && entry.observation?.uk_hybrid?.elev !== undefined);
 
-    const segments = [];
-
-    for (let i = 0; i < ranked.length - 1; i++) {
-        const upper = ranked[i];
-        const lower = ranked[i + 1];
-        const reading = lapse(weather.calculateLapseRate(upper.observation, lower.observation));
-
-        // Short names here: a segment names two stations at once, and the full
-        // pair would crowd both the tab bar and the video overlay.
-        segments.push({
-            ...reading,
+    return pairByElevation(reporting, entry => entry.observation.uk_hybrid.elev)
+        .map(({upper, lower}) => ({
+            ...lapse(weather.calculateLapseRate(upper.observation, lower.observation)),
+            // Short names here: a segment names two stations at once, and the
+            // full pair would crowd both the tab bar and the video overlay.
             from: upper.station.shortName,
             to: lower.station.shortName,
             span: `${upper.station.shortName} → ${lower.station.shortName}`
-        });
-    }
-
-    return segments;
+        }));
 }
 
 /**

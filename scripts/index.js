@@ -4,12 +4,9 @@ import sites from './sites.js';
 import youtube from './youtube.js';
 import trends from './trends.js';
 import * as readings from './readings.js';
-
-// Camera status costs a hidden player to check, so it lags the readings.
-const CAMERA_CHECK_MS = 5 * 60 * 1000;
-
-// How long to wait before trying again when the whole load fails.
-const RETRY_MS = 60 * 1000;
+import {READOUTS} from './config/readouts.js';
+import {CAMERA_CHECK_MS, RETRY_MS} from './config/defaults.js';
+import {Loop} from './lib/loop.js';
 
 const NO_READING = readings.NO_READING;
 
@@ -17,6 +14,10 @@ const NO_READING = readings.NO_READING;
  * Class for handling index page functionality
  */
 export class Index {
+    constructor() {
+        this.refresh = new Loop(() => this.processWeather());
+    }
+
     /**
      * An arrow, pointing the way the wind is going.
      *
@@ -79,74 +80,24 @@ export class Index {
 
     /**
      * The secondary readings for one station, in reading order.
+     *
+     * Which tiles there are, and where each one's value comes from, is in the
+     * readouts configuration. This only knows how to draw one.
+     *
      * @param {Object} observation - A station observation
      * @param {Object} metrics - Interpreted metrics for that same observation
      * @returns {string} HTML markup
      */
     renderReadouts(observation, metrics) {
-        const readoutList = [
-            {
-                label: 'Temperature',
-                icon: 'device_thermostat',
-                value: readings.temperature(observation).celsius,
-                unit: 'ºC'
-            },
-            {
-                label: 'Dew Point',
-                icon: 'opacity',
-                value: metrics.dewPoint?.celsius ?? NO_READING,
-                unit: 'ºC',
-                note: metrics.dewPoint?.description
-            },
-            {
-                label: 'Humidity',
-                icon: 'humidity_percentage',
-                value: metrics.humidity?.percent ?? NO_READING,
-                unit: '%',
-                note: metrics.humidity?.description
-            },
-            {
-                label: 'Heat Index',
-                icon: 'wb_sunny',
-                value: metrics.heatIndex?.celsius ?? NO_READING,
-                unit: 'ºC',
-                note: metrics.heatIndex?.description
-            },
-            {
-                label: 'Wind Chill',
-                icon: 'ac_unit',
-                value: metrics.windChill?.celsius ?? NO_READING,
-                unit: 'ºC',
-                note: metrics.windChill?.description
-            },
-            {
-                label: 'Barometric Pressure',
-                icon: 'speed',
-                value: metrics.barometricPressure?.kPa ?? NO_READING,
-                unit: metrics.barometricPressure ? 'kPa' : '',
-                note: metrics.barometricPressure?.description ?? 'This station does not report pressure.'
-            },
-            {
-                label: 'UV Index',
-                icon: 'light_mode',
-                value: observation.uv ?? NO_READING,
-                note: metrics.uvIndex ? `${metrics.uvIndex.risk} — ${metrics.uvIndex.description}` : undefined
-            },
-            {label: 'Solar Radiation', icon: 'brightness_7', value: observation.solarRadiation ?? NO_READING, unit: 'W/m²'},
-            {
-                label: 'Rainfall',
-                icon: 'water_drop',
-                value: readings.rainfall(observation).millimetres,
-                unit: 'mm',
-                note: 'Total so far today'
-            },
-            {
-                label: 'Precipitation Rate',
-                icon: 'grain',
-                value: readings.precipitationRate(observation).rate,
-                unit: 'mm/hr'
-            }
-        ];
+        const readoutList = READOUTS.map(readout => ({
+            label: readout.label,
+            icon: readout.icon,
+            value: readout.read(observation, metrics) ?? NO_READING,
+            unit: typeof readout.unit === 'function'
+                ? readout.unit(observation, metrics)
+                : readout.unit,
+            note: readout.note?.(observation, metrics)
+        }));
 
         return `
             <section class="readouts">
@@ -401,12 +352,7 @@ export class Index {
      * @returns {void}
      */
     scheduleRefresh(site) {
-        clearTimeout(this.refreshTimer);
-
-        this.refreshTimer = setTimeout(
-            () => this.processWeather(),
-            sites.refreshMs(site.stations)
-        );
+        this.refresh.in(sites.refreshMs(site.stations));
     }
 
     /**
@@ -484,8 +430,7 @@ export class Index {
                 </div>`;
 
             // Keep trying: a failed load must not end the refresh loop.
-            clearTimeout(this.refreshTimer);
-            this.refreshTimer = setTimeout(() => this.processWeather(), RETRY_MS);
+            this.refresh.in(RETRY_MS);
         }
     }
 }

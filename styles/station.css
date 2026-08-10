@@ -20,27 +20,17 @@
 
     --shadow: 0 1px 2px rgba(22, 32, 43, .05), 0 10px 24px -18px rgba(22, 32, 43, .35);
 
-    /* One family throughout. Tabular figures keep columns of numbers aligned
-       without reaching for a second, monospaced face. */
-    --font: "Archivo", system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-
     --gutter: clamp(1rem, 4vw, 2.5rem);
     --max: 1180px;
 }
 
-*, *::before, *::after { box-sizing: border-box; }
-
-html { -webkit-text-size-adjust: 100%; }
+/* The reset, the typeface and the utilities are in base.css. */
 
 body {
-    margin: 0;
     background: var(--page);
     color: var(--ink);
-    font-family: var(--font);
     font-size: 17px;
     line-height: 1.45;
-    font-variant-numeric: tabular-nums;
-    -webkit-font-smoothing: antialiased;
 }
 
 a { color: var(--accent); }
@@ -662,6 +652,14 @@ a { color: var(--accent); }
 
 .chart-key { font-size: 11px; font-weight: 600; fill: var(--ink-muted); }
 
+/* The same glyph as the wind tiles, at the size the row has room for. */
+.chart-arrow {
+    font-family: "Material Symbols Outlined", sans-serif;
+    font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+    font-size: 18px;
+    -webkit-font-smoothing: antialiased;
+}
+
 .chart-key-swatch { rx: 2; }
 
 .chart-crosshair { stroke: var(--ink); stroke-width: 1; opacity: .55; }
@@ -727,15 +725,6 @@ a { color: var(--accent); }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.visually-hidden {
-    position: absolute;
-    width: 1px; height: 1px;
-    margin: -1px; padding: 0;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-}
-
 /* --- Narrow --------------------------------------------------------------- */
 
 @media (max-width: 720px) {
@@ -782,12 +771,4 @@ a { color: var(--accent); }
     .chart-axis, .chart-unit { font-size: 9.5px; }
 
     .chart-key { font-size: 10px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
-        animation-duration: .01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: .01ms !important;
-    }
 }

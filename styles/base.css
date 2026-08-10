@@ -1,0 +1,48 @@
+/* ==========================================================================
+   Shared foundation
+
+   What every page agrees on: the box model, the typeface, figures that line up
+   in a column, and the handful of utilities that were being copied from one
+   stylesheet into the next.
+
+   Deliberately small. Colour is not here — the weather page is white and the
+   live page is black — and neither is layout. A rule earns its place in this
+   file only by being true of every page.
+   ========================================================================== */
+
+:root {
+    /* One family throughout. Tabular figures keep columns of numbers aligned
+       without reaching for a second, monospaced face. */
+    --font: "Archivo", system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+    margin: 0;
+    font-family: var(--font);
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* Present to a screen reader, absent to everyone else. */
+.visually-hidden {
+    position: absolute;
+    width: 1px; height: 1px;
+    margin: -1px; padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+/* Anyone who has asked their system to stop moving things has asked this site
+   too. Animation on this site is decoration in every case, so it all goes. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+    }
+}
