@@ -2,10 +2,6 @@ import time from './time.js';
 import weather from './weather.js';
 import * as readings from './readings.js';
 
-// Bounds of the lapse-rate scale, in °C per 1000 ft.
-const LAPSE_MIN = -4;
-const LAPSE_MAX = 2;
-
 // Top of the wind bar, in km/h. Anything faster pins the bar full.
 const WIND_SCALE = 40;
 
@@ -114,62 +110,51 @@ export class Index {
     }
 
     /**
-     * Build the banded lapse-rate scale with a marker at the current value.
-     * Band colours are the same stability bands used elsewhere in the app.
-     * @param {?number} lapseRate - Lapse rate in °C per 1000 ft, or null
-     * @returns {string} HTML markup
-     */
-    renderLapseScale(lapseRate) {
-        const span = LAPSE_MAX - LAPSE_MIN;
-        let lower = LAPSE_MIN;
-
-        const bands = weather.lapseSummaries.map(band => {
-            const upper = Math.min(band.max === Infinity ? LAPSE_MAX : band.max, LAPSE_MAX);
-            const width = Math.max(0, upper - lower) / span * 100;
-            lower = upper;
-            return `<span class="lapse-band" style="flex-grow: ${width}; background: ${band.color};"></span>`;
-        }).join('');
-
-        const marker = lapseRate === null
-            ? ''
-            : `<span class="lapse-marker" style="left: ${(Math.min(Math.max(lapseRate, LAPSE_MIN), LAPSE_MAX) - LAPSE_MIN) / span * 100}%;"></span>`;
-
-        return `
-            <div class="lapse-scale${lapseRate === null ? ' is-idle' : ''}">${bands}${marker}</div>
-            <div class="lapse-ends"><span>${LAPSE_MIN} unstable</span><span>inverted +${LAPSE_MAX}</span></div>`;
-    }
-
-    /**
-     * The lapse-rate summary. It measures the pair of stations rather than
-     * either one, so it belongs beside the site name rather than inside a
-     * station's tab, and it carries its own unavailable state.
+     * The lapse-rate tag that rides on the tab bar. Lapse rate is measured
+     * between the two stations, so it sits alongside the tabs rather than
+     * inside one, and it reads the same whichever station is selected.
+     *
+     * The stability band shows as one colour rather than a marker on the full
+     * spectrum: at a glance the answer is the colour, and the legend it used to
+     * carry was more chart than a person needs to read in passing.
+     *
      * @param {Object} lapseRateInfo - Lapse rate info from the weather service
      * @param {Object} stations - Per-station online flags
      * @returns {string} HTML markup
      */
-    renderLapseSummary(lapseRateInfo, stations) {
+    renderLapseTag(lapseRateInfo, stations) {
         const lapse = readings.lapse(lapseRateInfo);
-        const missing = [stations.launch, stations.ground].filter(s => s.id && !s.online);
 
         if (!lapse.available) {
+            const missing = [stations.launch, stations.ground]
+                .filter(s => s.id && !s.online)
+                .map(s => s.id);
+
             return `
-                <span class="label"><span class="label-icon" aria-hidden="true">elevation</span>Lapse rate</span>
-                <div class="lapse-head">
-                    <p class="lapse-value is-empty">${NO_READING}</p>
-                    <p class="lapse-note">Needs both stations reporting.${
-                        missing.length ? ` ${missing.map(s => s.id).join(' and ')} is offline.` : ''
-                    }</p>
-                </div>
-                ${this.renderLapseScale(null)}`;
+                <div class="lapse-tag is-idle">
+                    <span class="lapse-swatch" aria-hidden="true"></span>
+                    <div>
+                        <span class="label">Lapse rate</span>
+                        <p class="lapse-line"><span class="lapse-figure is-empty">${NO_READING}</span></p>
+                        <p class="lapse-sub">${
+                            missing.length ? `${missing.join(' and ')} offline` : 'Needs both stations'
+                        }</p>
+                    </div>
+                </div>`;
         }
 
         return `
-            <span class="label"><span class="label-icon" aria-hidden="true">elevation</span>Lapse rate &middot; ${lapse.elevDiff.toLocaleString()} ft launch to LZ</span>
-            <div class="lapse-head">
-                <p class="lapse-value">${lapse.rate}<span class="unit">ºC/1000 ft</span></p>
-                <p class="lapse-note"><span class="lapse-name">${lapse.name}</span><br>${lapse.description}</p>
-            </div>
-            ${this.renderLapseScale(lapse.rate)}`;
+            <div class="lapse-tag" title="${lapse.name}: ${lapse.description}">
+                <span class="lapse-swatch" style="background: ${lapse.colour};" aria-hidden="true"></span>
+                <div>
+                    <span class="label">Lapse rate</span>
+                    <p class="lapse-line">
+                        <span class="lapse-figure">${lapse.rate}</span>
+                        <span class="lapse-unit">ºC/1000 ft</span>
+                    </p>
+                    <p class="lapse-sub">${lapse.name} &middot; ${lapse.elevDiff.toLocaleString()} ft launch to LZ</p>
+                </div>
+            </div>`;
     }
 
     /**
@@ -302,10 +287,13 @@ export class Index {
      * The station switcher. Offline stations stay listed but disabled, so the
      * page says which station is missing rather than hiding it.
      * @param {Object[]} views - Every station, online or not
+     * @param {Object} lapseRateInfo - Lapse rate info, shown alongside the tabs
+     * @param {Object} stations - Per-station online flags
      * @returns {string} HTML markup
      */
-    renderTabs(views) {
+    renderTabs(views, lapseRateInfo, stations) {
         return `
+            <div class="tab-row">
             <div class="tabs" role="tablist" aria-label="Weather station">
                 ${views.map(view => `
                     <button class="tab" type="button" role="tab" id="tab-${view.key}"
@@ -319,6 +307,9 @@ export class Index {
                                 : ' &middot; offline'
                         }</span>
                     </button>`).join('')}
+            </div>
+
+            ${this.renderLapseTag(lapseRateInfo, stations)}
             </div>`;
     }
 
@@ -423,12 +414,8 @@ export class Index {
 
             weatherDataContainer.innerHTML =
                 notice +
-                this.renderTabs(views) +
+                this.renderTabs(views, data.lapseRateInfo, stations) +
                 enabled.map(view => this.renderStationView(view)).join('');
-
-            // Belongs to the pair of stations, so it sits outside the tabs.
-            document.getElementById('lapse-summary').innerHTML =
-                this.renderLapseSummary(data.lapseRateInfo, stations);
 
             const lookup = Object.fromEntries(enabled.map(view => [view.key, view]));
             this.bindTabs(enabled, lookup);

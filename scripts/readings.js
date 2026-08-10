@@ -101,6 +101,7 @@ export function lapse(lapseRateInfo) {
             elevDiff: null,
             name: null,
             description: null,
+            colour: null,
             summary: NO_READING,
             title: 'Lapse Rate'
         };
@@ -114,6 +115,7 @@ export function lapse(lapseRateInfo) {
         elevDiff,
         name: lapseRateInfo.details.name,
         description: lapseRateInfo.details.description,
+        colour: lapseRateInfo.details.color,
         summary: `${lapseRateInfo.lapseRate} ºC/1000 ft`,
         title: `Lapse Rate: (${elevDiff.toLocaleString()} ft)`
     };

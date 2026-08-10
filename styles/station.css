@@ -113,55 +113,6 @@ a { color: var(--blue); }
 
 .station-id .sep { color: var(--rule-strong); padding: 0 .5em; }
 
-/* Measures the pair of stations, so it sits with the site name rather than
-   inside either station's tab. */
-.lapse-dock {
-    flex: 0 1 340px;
-    align-self: flex-end;
-    padding: .7rem .9rem .8rem;
-    border: 1px solid var(--rule);
-    border-radius: 6px;
-    background: var(--surface);
-}
-
-.lapse-head {
-    display: flex;
-    align-items: baseline;
-    gap: .75rem;
-    margin-top: .35rem;
-}
-
-.lapse-value {
-    flex: none;
-    margin: 0;
-    font-family: var(--font-data);
-    font-size: 1.75rem;
-    font-weight: 500;
-    line-height: 1;
-    letter-spacing: -.01em;
-}
-
-.lapse-value .unit {
-    font-size: .4em;
-    font-weight: 400;
-    color: var(--ink-muted);
-    letter-spacing: .05em;
-    margin-left: .35em;
-}
-
-.lapse-value.is-empty { color: var(--ink-faint); }
-
-.lapse-note {
-    margin: 0;
-    font-size: .7rem;
-    line-height: 1.3;
-    color: var(--ink-muted);
-}
-
-.lapse-dock .lapse-scale { margin-top: .6rem; }
-
-.lapse-dock .lapse-ends { margin-top: .4rem; }
-
 .masthead-aside {
     display: flex;
     align-items: center;
@@ -209,11 +160,21 @@ a { color: var(--blue); }
 
 /* --- Station switcher ----------------------------------------------------- */
 
+/* Tabs on the left, the pair-wide lapse reading on the right. The rule runs
+   under both, so the reading reads as part of the bar rather than a card. */
+.tab-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: .5rem 1.5rem;
+    margin-top: var(--gutter);
+    border-bottom: 1px solid var(--rule);
+}
+
 .tabs {
     display: flex;
     gap: .25rem;
-    margin-top: var(--gutter);
-    border-bottom: 1px solid var(--rule);
 }
 
 .tab {
@@ -254,7 +215,63 @@ a { color: var(--blue); }
 
 .tab[disabled] { opacity: .45; cursor: default; }
 
-.tabs + .view .panel { margin-top: 1.25rem; }
+.tab-row + .view .panel { margin-top: 1.25rem; }
+
+/* --- Lapse rate on the tab bar -------------------------------------------- */
+
+.lapse-tag {
+    display: flex;
+    align-items: stretch;
+    gap: .6rem;
+    padding-bottom: .55rem;
+}
+
+/* One band, not the whole spectrum: the colour is the answer. */
+.lapse-swatch {
+    flex: none;
+    width: 6px;
+    border-radius: 3px;
+    background: var(--rule-strong);
+}
+
+.lapse-tag.is-idle .lapse-swatch {
+    background: repeating-linear-gradient(
+        135deg,
+        var(--rule) 0 3px,
+        var(--surface) 3px 6px
+    );
+    box-shadow: inset 0 0 0 1px var(--rule);
+}
+
+.lapse-line {
+    margin: .15rem 0 0;
+    display: flex;
+    align-items: baseline;
+    gap: .35rem;
+}
+
+.lapse-figure {
+    font-family: var(--font-data);
+    font-size: 1.375rem;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: -.01em;
+}
+
+.lapse-figure.is-empty { color: var(--ink-faint); }
+
+.lapse-unit {
+    font-family: var(--font-data);
+    font-size: .6875rem;
+    color: var(--ink-muted);
+    letter-spacing: .04em;
+}
+
+.lapse-sub {
+    margin: .2rem 0 0;
+    font-size: .6875rem;
+    color: var(--ink-muted);
+}
 
 .view:focus { outline: none; }
 
@@ -377,56 +394,6 @@ a { color: var(--blue); }
 }
 
 /* lapse rate scale */
-.lapse-scale {
-    position: relative;
-    height: 12px;
-    margin-top: 1.1rem;
-    border-radius: 3px;
-    overflow: hidden;
-    display: flex;
-}
-
-.lapse-band { flex: 1 1 auto; }
-
-.lapse-scale.is-idle { opacity: .35; filter: saturate(.4); }
-
-.stat-value.is-empty, .readout-value.is-empty { color: var(--ink-faint); }
-
-.lapse-marker {
-    position: absolute;
-    top: -5px;
-    bottom: -5px;
-    width: 2px;
-    background: var(--ink);
-    transform: translateX(-1px);
-    transition: left .9s cubic-bezier(.22, .61, .36, 1);
-}
-
-.lapse-marker::after {
-    content: "";
-    position: absolute;
-    top: -4px;
-    left: 50%;
-    width: 7px;
-    height: 7px;
-    background: var(--ink);
-    transform: translateX(-50%) rotate(45deg);
-}
-
-.lapse-ends {
-    display: flex;
-    justify-content: space-between;
-    margin-top: .55rem;
-    font-family: var(--font-data);
-    font-size: .6875rem;
-    color: var(--ink-faint);
-}
-
-.lapse-name {
-    font-weight: 600;
-    color: var(--ink);
-}
-
 /* --- Readout grid --------------------------------------------------------- */
 
 .readouts {
@@ -546,7 +513,6 @@ a { color: var(--blue); }
 @media (max-width: 720px) {
     .panel { grid-template-columns: 1fr; }
     .masthead { align-items: flex-start; }
-    .lapse-dock { flex: 1 1 100%; }
     .masthead-aside { width: 100%; justify-content: space-between; padding-bottom: 0; }
     .timestamp { text-align: left; }
 }
