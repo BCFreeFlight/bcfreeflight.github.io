@@ -356,8 +356,17 @@ a { color: var(--accent); }
 }
 
 /* Both tiles are the same height, so the figure sits where the arrow does
-   rather than floating at the top of an empty box. */
-.wind-card--speed { justify-content: center; }
+   rather than floating at the top of an empty box — and it is centred to match
+   it, so the two tiles read as a pair rather than two different layouts. */
+.wind-card--speed {
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+}
+
+/* The label stays on the left in both tiles, where the readouts below keep
+   theirs. Only the figures are centred. */
+.wind-card--speed .label { align-self: stretch; text-align: left; }
 
 .wind-speed {
     margin: .5rem 0 0;
