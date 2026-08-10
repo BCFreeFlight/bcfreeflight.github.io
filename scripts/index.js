@@ -10,6 +10,12 @@ const WIND_SCALE = 40;
 // Speed at which the windsock reads fully extended, in km/h.
 const WINDSOCK_FULL = 20;
 
+// Camera status costs a hidden player to check, so it lags the readings.
+const CAMERA_CHECK_MS = 5 * 60 * 1000;
+
+// How long to wait before trying again when the whole load fails.
+const RETRY_MS = 60 * 1000;
+
 const NO_READING = readings.NO_READING;
 
 /**
@@ -339,7 +345,7 @@ export class Index {
      * @param {Object} lookup - View key to its observation and station id
      * @returns {void}
      */
-    bindTabs(enabled, lookup) {
+    bindTabs(enabled, lookup, preferredKey = null) {
         const tabs = [...document.querySelectorAll('.tab:not([disabled])')];
 
         tabs.forEach(tab => {
@@ -354,7 +360,9 @@ export class Index {
             });
         });
 
-        this.activateView(enabled[0].station.key, lookup);
+        // Keep the reader where they were, unless that station has since gone dark.
+        const restored = preferredKey && lookup[preferredKey] ? preferredKey : enabled[0].station.key;
+        this.activateView(restored, lookup);
     }
 
     /**
@@ -398,21 +406,67 @@ export class Index {
             return;
         }
 
+        // Each check starts a hidden player, so it runs far less often than the
+        // readings refresh.
+        const now = Date.now();
+        if (this.lastCameraCheck && now - this.lastCameraCheck < CAMERA_CHECK_MS) return;
+        this.lastCameraCheck = now;
+
+        let live;
         try {
-            const live = await youtube.isLive(camera.youtube);
-            if (live) return;
+            live = await youtube.isLive(camera.youtube);
         } catch (error) {
-            // Leave the link alone: an unreachable API is not proof of an
+            // Leave the link as it is: an unreachable API is not proof of an
             // off-air camera, and a working link beats a wrong "Offline".
             console.error('Could not determine live status:', error);
+            return;
+        }
+
+        this.setCameraState(link, live);
+    }
+
+    /**
+     * Puts the camera link into its live or off-air state. Both directions are
+     * handled, so a camera that comes back mid-session gets its link back.
+     * @param {HTMLElement} link - The camera link
+     * @param {boolean} live - Whether the camera is broadcasting
+     * @returns {void}
+     */
+    setCameraState(link, live) {
+        if (live) {
+            link.classList.remove('is-offline');
+            link.setAttribute('href', 'live');
+            link.removeAttribute('aria-disabled');
+            link.removeAttribute('title');
+            link.innerHTML = '<span class="live-dot" aria-hidden="true"></span>Live camera';
             return;
         }
 
         link.classList.add('is-offline');
         link.removeAttribute('href');
         link.setAttribute('aria-disabled', 'true');
-        link.innerHTML = 'Camera offline';
+        link.textContent = 'Camera offline';
         link.title = 'The camera is not broadcasting right now';
+    }
+
+    /**
+     * Queues the next read at the site's own cadence.
+     *
+     * The interval is the shortest cache timeout in the configuration, so each
+     * station comes back exactly as often as its own setting allows: the
+     * frequent one refetches, the slower ones are served from cache until their
+     * timeout lapses. No station is polled harder than it asked for.
+     *
+     * @param {Object} site - The resolved site
+     * @returns {void}
+     */
+    scheduleRefresh(site) {
+        clearTimeout(this.refreshTimer);
+
+        this.refreshTimer = setTimeout(
+            () => this.processWeather(),
+            sites.refreshMs(site.stations)
+        );
     }
 
     /**
@@ -443,6 +497,7 @@ export class Index {
                         <p>None of ${loaded.map(entry => entry.station.id).join(', ')} is reporting. Try
                            <a href="https://wunderground.com/dashboard/pws/${loaded[0].station.id}" target="_blank" rel="noopener">${loaded[0].station.name} on Weather Underground</a>.</p>
                     </div>`;
+                this.scheduleRefresh(site);
                 return;
             }
 
@@ -453,24 +508,38 @@ export class Index {
                 }.</p>`
                 : '';
 
+            // Which tab the reader was on, so a refresh does not send them back
+            // to the first station mid-read.
+            const selected = document.querySelector('.tab[aria-selected="true"]')?.dataset.view;
+            const hadFocus = document.activeElement?.classList.contains('tab');
+
             weatherDataContainer.innerHTML =
                 notice +
                 this.renderTabs(loaded) +
                 enabled.map(entry => this.renderStationView(entry)).join('');
 
             const lookup = Object.fromEntries(enabled.map(entry => [entry.station.key, entry]));
-            this.bindTabs(enabled, lookup);
+            this.bindTabs(enabled, lookup, selected);
+
+            if (hadFocus) {
+                document.querySelector('.tab[aria-selected="true"]')?.focus();
+            }
 
             // Deliberately not awaited: the readings are already on screen.
             this.updateCameraLink(site);
+            this.scheduleRefresh(site);
 
         } catch (error) {
             console.error("Error in weather app:", error);
             weatherDataContainer.innerHTML = `
                 <div class="state">
                     <p class="state-title">Couldn't reach the stations</p>
-                    <p>The weather service didn't answer. Reload in a minute.</p>
+                    <p>The weather service didn't answer. Trying again shortly.</p>
                 </div>`;
+
+            // Keep trying: a failed load must not end the refresh loop.
+            clearTimeout(this.refreshTimer);
+            this.refreshTimer = setTimeout(() => this.processWeather(), RETRY_MS);
         }
     }
 }

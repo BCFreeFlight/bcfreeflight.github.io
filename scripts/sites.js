@@ -129,6 +129,30 @@ export class Sites {
     }
 
     /**
+     * How often to re-read a site, in milliseconds.
+     *
+     * This is the shortest cache timeout among its stations. Polling at that
+     * cadence lets every station come back exactly as often as its own timeout
+     * allows: the frequent one refetches each time, and the slower ones are
+     * served from cache until their own timeout lapses. So one timer honours
+     * every station's setting without a timer each.
+     *
+     * @param {Object[]} stations - Normalised stations
+     * @returns {number} Milliseconds between refreshes
+     */
+    refreshMs(stations) {
+        const seconds = stations
+            .map(station => station.cacheSeconds)
+            .filter(value => Number.isFinite(value) && value > 0);
+
+        if (!seconds.length) return REFERENCE_CACHE_SECONDS * 1000;
+
+        // A floor, so a station configured at a few seconds cannot turn the
+        // page into a polling loop.
+        return Math.max(Math.min(...seconds), 30) * 1000;
+    }
+
+    /**
      * The site a page belongs to, taken from `data-site` on the body.
      * @returns {?string} The slug, or null when the page does not declare one
      */

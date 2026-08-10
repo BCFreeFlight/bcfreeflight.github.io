@@ -3,6 +3,9 @@ import sites from './sites.js';
 import youtube from './youtube.js';
 import * as readings from './readings.js';
 
+// How long to wait before trying again when a read fails outright.
+const RETRY_MS = 60 * 1000;
+
 // The player settings this page has always used: muted autoplay, no chrome.
 const PLAYER_PARAMS = {
     autoplay: 1,
@@ -33,10 +36,10 @@ export class Live {
         this.setupDragToPan();
         await this.setupPlayer();
 
-        // Initial data load
+        // Initial data load, then keep to the cadence the configuration asks
+        // for: the shortest station cache timeout, so each station comes back
+        // exactly as often as its own setting allows.
         await this.loadAndDisplayWeatherOverlay();
-        // Set up an automatic refresh every 5 minutes
-        setInterval(() => this.loadAndDisplayWeatherOverlay(), 5 * 60 * 1000);
         // Refresh every hour (3_600_000 milliseconds)
         setInterval(() => this.refreshIframe(), 60 * 60 * 1000);
         // Refresh the whole page every 8 hours just in case something got balled up.
@@ -289,8 +292,10 @@ export class Live {
      * @returns {Promise<void>}
      */
     async loadAndDisplayWeatherOverlay() {
+        let site;
+
         try {
-            const site = await sites.site(sites.slugFromPage());
+            site = await sites.site(sites.slugFromPage());
             const loaded = await weather.loadStations(site.stations);
 
             // The overlay speaks for the site's default station; lapse rate
@@ -317,6 +322,14 @@ export class Live {
             this.setReading('#rainfall', readings.rainfall(observation).summary);
         } catch (error) {
             console.error("Error updating weather overlay:", error);
+        } finally {
+            // Queue the next read whether or not this one worked, so a blip
+            // never ends the loop on a display nobody is watching.
+            clearTimeout(this.overlayTimer);
+            this.overlayTimer = setTimeout(
+                () => this.loadAndDisplayWeatherOverlay(),
+                site ? sites.refreshMs(site.stations) : RETRY_MS
+            );
         }
     }
 
