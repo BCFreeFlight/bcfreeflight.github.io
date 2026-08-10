@@ -358,6 +358,26 @@ export class Index {
     }
 
     /**
+     * Names the page after the site it is showing. The heading, the tab title
+     * and the description all come from sites.json, so a site is spelled out in
+     * one place rather than in each page's markup.
+     * @param {Object} site - The resolved site
+     * @returns {void}
+     */
+    renderSiteIdentity(site) {
+        document.title = site.name;
+
+        const heading = document.getElementById('site-name');
+        if (heading) heading.textContent = site.name;
+
+        const description = document.querySelector('meta[name="description"]');
+        if (description) {
+            description.setAttribute('content',
+                `Live wind, thermal, and weather conditions at ${site.name}.`);
+        }
+    }
+
+    /**
      * Points the camera link at the live page while the stream is up, and turns
      * it into a plain "Offline" marker when it is not.
      *
@@ -405,12 +425,12 @@ export class Index {
 
         try {
             const site = await sites.site(sites.slugFromPage());
-            const ordered = sites.inTabOrder(site.stations);
-            const loaded = await weather.loadStations(ordered);
 
-            document.title = site.name;
-            const wordmark = document.querySelector('.wordmark');
-            if (wordmark) wordmark.textContent = site.name;
+            // Name the page before fetching anything, so a station that fails
+            // still leaves the site identified rather than blank.
+            this.renderSiteIdentity(site);
+
+            const loaded = await weather.loadStations(sites.inTabOrder(site.stations));
 
             // Whichever stations answered. One being dark never hides the others.
             const enabled = loaded.filter(entry => entry.online);

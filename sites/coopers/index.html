@@ -3,8 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cooper's Launch</title>
-    <meta name="description" content="Live wind, thermal, and weather conditions at Cooper's Launch, Lumby BC.">
+    <!-- Both are replaced from sites.json on load; these are the fallbacks
+         for a visitor whose script never runs. -->
+    <title>BC Free Flight</title>
+    <meta name="description" content="Live wind, thermal, and weather conditions for BC Free Flight sites.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet"
@@ -18,7 +20,8 @@
 <div class="shell">
     <header class="masthead">
         <div>
-            <h1 class="wordmark">Cooper&rsquo;s Launch</h1>
+            <!-- Filled from sites.json by index.js -->
+            <h1 class="wordmark" id="site-name"></h1>
             <span class="station-id" id="location"></span>
         </div>
 
@@ -38,7 +41,7 @@
         <div class="state">
             <div class="sweep" aria-hidden="true"></div>
             <p class="state-title">Reading the station</p>
-            <p>Pulling the latest observation from Lumby.</p>
+            <p>Pulling the latest observation.</p>
         </div>
     </main>
 </div>
