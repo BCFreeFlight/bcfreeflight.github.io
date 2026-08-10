@@ -151,7 +151,9 @@ export class Live {
                 visible ? 'Hide the weather readings' : 'Show the weather readings';
         };
 
-        applyView(this.readPreference(VIEW_KEY, 'fill'));
+        // Whole frame by default: arriving on a cropped view hides part of the
+        // sky, and the button is there for anyone who wants to fill the screen.
+        applyView(this.readPreference(VIEW_KEY, 'fit'));
         applyWeather(this.readPreference(WEATHER_KEY, 'shown') === 'shown');
 
         viewButton.addEventListener('click', () => {
