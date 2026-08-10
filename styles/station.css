@@ -879,20 +879,40 @@ a { color: var(--accent); }
     opacity: .9;
 }
 
-/* Dark rather than the RASP's white, because our stability palette runs
-   through pale pinks a white barb would vanish into. */
-.windgram-barb {
-    fill: #111827;
-    stroke: #111827;
-    stroke-width: 1.3;
+/* White, as on the RASP, over a dark halo. The halo is what makes the white
+   survive our own palette: four of the nine stability bands are pale enough
+   that a bare white barb would disappear into them. Drawn as two passes in the
+   markup, so no barb's halo lands on its neighbour's white. */
+.windgram-barb,
+.windgram-barb-halo,
+.windgram-calm,
+.windgram-calm-halo {
     stroke-linecap: round;
     stroke-linejoin: round;
 }
 
+.windgram-barb-halo {
+    fill: rgba(17, 24, 39, .55);
+    stroke: rgba(17, 24, 39, .55);
+    stroke-width: 3.6;
+}
+
+.windgram-barb {
+    fill: #ffffff;
+    stroke: #ffffff;
+    stroke-width: 1.4;
+}
+
+.windgram-calm-halo {
+    fill: none;
+    stroke: rgba(17, 24, 39, .55);
+    stroke-width: 3.4;
+}
+
 .windgram-calm {
     fill: none;
-    stroke: #111827;
-    stroke-width: 1.3;
+    stroke: #ffffff;
+    stroke-width: 1.4;
 }
 
 .windgram-axis {

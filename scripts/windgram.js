@@ -1,5 +1,5 @@
 import {
-    LAYOUT, STRIPS, BARB_SPACING, COLUMN_MS, EXTRAPOLATED_OPACITY
+    LAYOUT, STRIPS, BARB_SPACING, BARB_OFFSET_FEET, COLUMN_MS, EXTRAPOLATED_OPACITY
 } from './config/rasp.js';
 import {LAPSE} from './config/bands.js';
 import {FEET} from './rasp.js';
@@ -501,14 +501,22 @@ export class Windgram {
      * panel with interpolated barbs would look more like the forecast it is
      * modelled on and mean considerably less.
      *
+     * White, as on the RASP — but drawn twice, because the RASP can afford
+     * plain white and this cannot. Its background is saturated model output
+     * throughout; ours is the site's stability palette, which runs through
+     * several near-white bands a white barb would simply vanish into. So each
+     * one is laid down first as a dark halo and then in white on top, which
+     * reads as white everywhere and stays legible over the pale bands.
+     *
      * @returns {string} SVG markup
      */
     renderBarbs() {
         const columns = this.model.columns;
         const perColumn = (this.right - this.left) / Math.max(columns.length, 1);
         const step = Math.max(1, Math.round(BARB_SPACING / Math.max(perColumn, 1)));
+        const lift = BARB_OFFSET_FEET * FEET;
 
-        let marks = '';
+        const marks = [];
 
         for (let index = Math.floor(step / 2); index < columns.length; index += step) {
             const column = columns[index];
@@ -517,22 +525,38 @@ export class Windgram {
             column.levels.forEach(level => {
                 if (level.windDir === null || level.windSpeed === null) return;
 
-                const y = this.y(level.elevation);
+                // Lifted clear of the station's own rule and name. The reading
+                // still belongs to the station's true height, which is where
+                // that rule is drawn.
+                const y = this.y(level.elevation + lift);
                 const at = `${x.toFixed(1)} ${y.toFixed(1)}`;
 
                 if (level.windSpeed < CALM) {
-                    marks += `<circle class="windgram-calm" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.6"></circle>`;
+                    marks.push({calm: true, x: x.toFixed(1), y: y.toFixed(1)});
                     return;
                 }
 
                 // The shaft is drawn pointing up and turned to the bearing the
                 // wind is coming from, which is what the reading names.
-                marks += `<path class="windgram-barb" d="${barbPath(level.windSpeed)}"
-                                transform="translate(${at}) rotate(${level.windDir.toFixed(0)})"></path>`;
+                marks.push({
+                    d: barbPath(level.windSpeed),
+                    transform: `translate(${at}) rotate(${level.windDir.toFixed(0)})`
+                });
             });
         }
 
-        return `<g class="windgram-barbs">${marks}</g>`;
+        /**
+         * @param {string} kind - The class suffix, halo or nothing
+         * @returns {string} Every mark drawn in one pass
+         */
+        const pass = kind => marks.map(mark => mark.calm
+            ? `<circle class="windgram-calm${kind}" cx="${mark.x}" cy="${mark.y}" r="2.6"></circle>`
+            : `<path class="windgram-barb${kind}" d="${mark.d}" transform="${mark.transform}"></path>`
+        ).join('');
+
+        // Every halo first, then every barb: drawn barb by barb, one mark's
+        // halo would sit on top of its neighbour's white.
+        return `<g class="windgram-barbs">${pass('-halo')}${pass('')}</g>`;
     }
 
     /**
@@ -691,8 +715,8 @@ export class Windgram {
 
         const sentences = [
             `Local lapse rate in ºC per 1000 ft. Wind barbs in km/h. Time${zone}.`,
-            'Blue hatching is air within half a degree of its dew point; grey hatching is air no station was reporting from.',
-            `* Shade is how much of the clear-sky sunlight is missing — cloud, haze or terrain. Lift is worked out from that and the measured profile, not sensed, with thermals released from ${launch}. Air above ${top} is extrapolated.`
+            'Blue hatching is air within half a degree of its dew point; grey hatching is air no station was reporting from. Barbs sit 300 ft above their station so they clear its line.',
+            `* Shade is how much of the clear-sky sunlight is missing — cloud, haze, smoke or terrain. Lift is worked out from that and the measured profile, not sensed, with thermals released from ${launch}. Air above ${top} is extrapolated.`
         ];
 
         // Wrapped on a character estimate rather than on measured text: the

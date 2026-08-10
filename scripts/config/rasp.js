@@ -65,6 +65,16 @@ export const LAYOUT = {
 export const BARB_SPACING = 26;
 
 /**
+ * How far above its station a barb is drawn, in feet.
+ *
+ * Purely so it can be seen. Sitting exactly on the station's own height put
+ * every barb on top of that station's dashed rule and its name, which is the
+ * busiest line on the drawing. The rule stays at the true elevation; only the
+ * barb is lifted clear of it.
+ */
+export const BARB_OFFSET_FEET = 300;
+
+/**
  * The strips above the altitude panel, top to bottom, exactly as the RASP
  * stacks them. `read` takes a column of the model and returns the value; `nice`
  * is the smallest range the axis is allowed to shrink to, so a still day does
