@@ -59,14 +59,16 @@ export class Trends {
     }
 
     /**
-     * The markup a station's panel is built into. It is deliberately empty of
-     * chips: which measurements a station reports is only known once its day
-     * has been read, and offering a chip that draws nothing is worse than
-     * waiting a moment for the real list.
+     * The markup a station's panel is built into. The list of measurements is
+     * deliberately left empty: which ones a station reports is only known once
+     * its day has been read, and offering a measurement that draws nothing is
+     * worse than waiting a moment for the real list.
      * @param {Object} station - A normalised station
      * @returns {string} HTML markup
      */
     render(station) {
+        const menuId = `trend-menu-${station.key}`;
+
         return `
             <section class="trend" data-trend="${station.key}">
                 <div class="trend-head">
@@ -74,15 +76,28 @@ export class Trends {
                         <span class="label-icon" aria-hidden="true">show_chart</span>Today so far
                     </span>
 
-                    <div class="trend-modes" role="group" aria-label="Chart layout">
-                        <button class="trend-mode" type="button" data-mode="split"
-                                aria-pressed="${this.mode === 'split'}">Stacked</button>
-                        <button class="trend-mode" type="button" data-mode="combined"
-                                aria-pressed="${this.mode === 'combined'}">Overlay</button>
+                    <div class="trend-controls">
+                        <div class="trend-picker">
+                            <button class="trend-picker-toggle" type="button"
+                                    aria-expanded="false" aria-controls="${menuId}">
+                                <span class="trend-picker-text">Measurements</span>
+                                <span class="trend-count"></span>
+                                <span class="trend-caret" aria-hidden="true">expand_more</span>
+                            </button>
+
+                            <div class="trend-menu" id="${menuId}" role="group"
+                                 aria-label="Measurements" hidden></div>
+                        </div>
+
+                        <div class="trend-modes" role="group" aria-label="Chart layout">
+                            <button class="trend-mode" type="button" data-mode="split"
+                                    aria-pressed="${this.mode === 'split'}">Stacked</button>
+                            <button class="trend-mode" type="button" data-mode="combined"
+                                    aria-pressed="${this.mode === 'combined'}">Overlay</button>
+                        </div>
                     </div>
                 </div>
 
-                <div class="trend-chips" role="group" aria-label="Measurements"></div>
                 <div class="chart-host"></div>
                 <p class="trend-note">Reading today's log…</p>
             </section>`;
@@ -100,7 +115,14 @@ export class Trends {
      * @returns {void}
      */
     mount(entries) {
-        this.panels.forEach(panel => panel.chart.destroy());
+        this.panels.forEach(panel => {
+            panel.chart.destroy();
+            // These are on the document, not the panel, so they outlive the
+            // markup they were bound for unless they are taken off by hand.
+            document.removeEventListener('pointerdown', panel.dismiss);
+            document.removeEventListener('keydown', panel.escape);
+        });
+
         this.panels.clear();
 
         entries.forEach(entry => {
@@ -162,14 +184,35 @@ export class Trends {
     }
 
     /**
-     * Wires one panel's chips and layout buttons.
+     * Wires one panel's measurement list and layout buttons.
      * @param {Object} panel - A mounted panel
      * @returns {void}
      */
     bind(panel) {
-        panel.host.querySelector('.trend-chips').addEventListener('click', event => {
-            const chip = event.target.closest('.trend-chip, .trend-bulk');
-            if (!chip) return;
+        const toggle = panel.host.querySelector('.trend-picker-toggle');
+
+        toggle.addEventListener('click', () => this.setMenu(panel, !this.isOpen(panel)));
+
+        // Anywhere outside the list closes it, the way a select does, so it
+        // never sits open over the chart it is meant to be changing.
+        panel.dismiss = event => {
+            if (!panel.host.querySelector('.trend-picker').contains(event.target)) {
+                this.setMenu(panel, false);
+            }
+        };
+
+        panel.escape = event => {
+            if (event.key !== 'Escape' || !this.isOpen(panel)) return;
+            this.setMenu(panel, false);
+            toggle.focus();
+        };
+
+        document.addEventListener('pointerdown', panel.dismiss);
+        document.addEventListener('keydown', panel.escape);
+
+        panel.host.querySelector('.trend-menu').addEventListener('click', event => {
+            const option = event.target.closest('.trend-option, .trend-bulk');
+            if (!option) return;
 
             const bulk = event.target.closest('.trend-bulk');
             if (bulk) {
@@ -182,7 +225,7 @@ export class Trends {
                 return;
             }
 
-            const key = chip.dataset.series;
+            const key = option.dataset.series;
             const showing = this.showing();
 
             this.selected = showing.includes(key)
@@ -201,6 +244,26 @@ export class Trends {
             remember(MODE_KEY, this.mode);
             this.panels.forEach(other => this.apply(other));
         });
+    }
+
+    /**
+     * @param {Object} panel - A mounted panel
+     * @returns {boolean} Whether its measurement list is open
+     */
+    isOpen(panel) {
+        return !panel.host.querySelector('.trend-menu').hidden;
+    }
+
+    /**
+     * Opens or closes one panel's measurement list.
+     * @param {Object} panel - A mounted panel
+     * @param {boolean} open - Whether it should be open
+     * @returns {void}
+     */
+    setMenu(panel, open) {
+        panel.host.querySelector('.trend-menu').hidden = !open;
+        panel.host.querySelector('.trend-picker-toggle')
+            .setAttribute('aria-expanded', String(open));
     }
 
     /**
@@ -255,19 +318,30 @@ export class Trends {
         const available = this.catalogue().filter(series =>
             day?.values?.[series.key]?.some(value => value !== null));
 
-        const chips = panel.host.querySelector('.trend-chips');
+        const menu = panel.host.querySelector('.trend-menu');
         const note = panel.host.querySelector('.trend-note');
+        const chosen = available.filter(series => showing.includes(series.key));
 
-        chips.innerHTML = available.map(series => `
-            <button class="trend-chip" type="button" data-series="${series.key}"
-                    aria-pressed="${showing.includes(series.key)}"
-                    style="--series: ${series.colour}">
-                <span class="trend-swatch" aria-hidden="true"></span>${
-                    series.group === 'lapse' ? `Lapse ${series.label}` : series.label
-                }
-            </button>`).join('') + `
-            <button class="trend-bulk" type="button" data-bulk="all">All</button>
-            <button class="trend-bulk" type="button" data-bulk="none">Clear</button>`;
+        // Rebuilt in place, so the list stays open while measurements are
+        // turned on and off and the chart changes underneath it.
+        menu.innerHTML = `
+            <div class="trend-menu-actions">
+                <button class="trend-bulk" type="button" data-bulk="all">All</button>
+                <button class="trend-bulk" type="button" data-bulk="none">Clear</button>
+            </div>
+            ${available.map(series => `
+                <button class="trend-option" type="button" data-series="${series.key}"
+                        aria-pressed="${showing.includes(series.key)}"
+                        style="--series: ${series.colour}">
+                    <span class="trend-swatch" aria-hidden="true"></span>
+                    <span class="trend-option-label">${
+                        series.group === 'lapse' ? `Lapse ${series.label}` : series.label
+                    }</span>
+                    <span class="trend-tick" aria-hidden="true">check</span>
+                </button>`).join('')}`;
+
+        panel.host.querySelector('.trend-count').textContent =
+            available.length ? `${chosen.length} of ${available.length}` : '';
 
         // The buttons are written once with the markup, so the pressed one is
         // put back in step here whenever the choice changes.
