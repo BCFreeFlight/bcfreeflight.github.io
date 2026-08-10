@@ -1,5 +1,6 @@
 import time from './time.js';
 import weather from './weather.js';
+import sites from './sites.js';
 import * as readings from './readings.js';
 
 // Top of the wind bar, in km/h. Anything faster pins the bar full.
@@ -7,9 +8,6 @@ const WIND_SCALE = 40;
 
 // Speed at which the windsock reads fully extended, in km/h.
 const WINDSOCK_FULL = 20;
-
-const LAUNCH_STATION = 'ILUMBY7';
-const GROUND_STATION = 'ILUMBY8';
 
 const NO_READING = readings.NO_READING;
 
@@ -118,41 +116,35 @@ export class Index {
      * spectrum: at a glance the answer is the colour, and the legend it used to
      * carry was more chart than a person needs to read in passing.
      *
-     * @param {Object} lapseRateInfo - Lapse rate info from the weather service
-     * @param {Object} stations - Per-station online flags
+     * @param {Object[]} loaded - Station entries from Weather.loadStations
      * @returns {string} HTML markup
      */
-    renderLapseTag(lapseRateInfo, stations) {
-        const lapse = readings.lapse(lapseRateInfo);
+    renderLapseTag(loaded) {
+        const segments = readings.lapseSegments(loaded);
 
-        if (!lapse.available) {
-            const missing = [stations.launch, stations.ground]
-                .filter(s => s.id && !s.online)
-                .map(s => s.id);
+        if (!segments.length) {
+            const offline = loaded.filter(entry => !entry.online).map(entry => entry.station.name);
 
             return `
-                <div class="lapse-tag is-idle">
-                    <span class="lapse-swatch" aria-hidden="true"></span>
-                    <div>
-                        <span class="label">Lapse rate</span>
-                        <p class="lapse-line"><span class="lapse-figure is-empty">${NO_READING}</span></p>
-                        <p class="lapse-sub">${
-                            missing.length ? `${missing.join(' and ')} offline` : 'Needs both stations'
-                        }</p>
-                    </div>
+                <div class="lapse-tag">
+                    <span class="label">Lapse rate</span>
+                    <p class="lapse-sub">${
+                        offline.length ? `${offline.join(' and ')} offline` : 'Needs two stations reporting'
+                    }</p>
                 </div>`;
         }
 
         return `
-            <div class="lapse-tag" title="${lapse.name}: ${lapse.description}">
-                <span class="lapse-swatch" style="background: ${lapse.colour};" aria-hidden="true"></span>
-                <div>
-                    <span class="label">Lapse rate</span>
-                    <p class="lapse-line">
-                        <span class="lapse-figure">${lapse.rate}</span>
-                        <span class="lapse-unit">ºC/1000 ft</span>
-                    </p>
-                    <p class="lapse-sub">${lapse.name} &middot; ${lapse.elevDiff.toLocaleString()} ft launch to LZ</p>
+            <div class="lapse-tag">
+                <span class="label">Lapse rate</span>
+                <div class="lapse-segments">
+                    ${segments.map(segment => `
+                        <div class="lapse-segment" title="${segment.name}: ${segment.description}">
+                            <span class="lapse-swatch" style="background: ${segment.colour};" aria-hidden="true"></span>
+                            <span class="lapse-figure">${segment.rate}</span>
+                            <span class="lapse-span">${segment.span}</span>
+                            <span class="lapse-gap">${segment.elevDiff.toLocaleString()} ft</span>
+                        </div>`).join('')}
                 </div>
             </div>`;
     }
@@ -241,11 +233,12 @@ export class Index {
 
     /**
      * A full readings panel for one station.
-     * @param {Object} view - A station view: key, observation, metrics
+     * @param {Object} entry - A station entry: station, observation, metrics
      * @returns {string} HTML markup
      */
-    renderStationView(view) {
-        const observation = view.observation;
+    renderStationView(entry) {
+        const observation = entry.observation;
+        const key = entry.station.key;
         const uk = observation.uk_hybrid ?? {};
         const wind = readings.wind(observation);
 
@@ -253,8 +246,8 @@ export class Index {
         const gustPct = Math.min((uk.windGust ?? 0) / WIND_SCALE, 1) * 100;
 
         return `
-            <div class="view" id="panel-${view.key}" role="tabpanel" tabindex="0"
-                 aria-labelledby="tab-${view.key}" data-view="${view.key}" hidden>
+            <div class="view" id="panel-${key}" role="tabpanel" tabindex="0"
+                 aria-labelledby="tab-${key}" data-view="${key}" hidden>
                 <section class="panel">
                     <div class="rose-cell">
                         ${this.renderRose(wind, uk.windSpeed)}
@@ -279,37 +272,35 @@ export class Index {
                     </div>
                 </section>
 
-                ${this.renderReadouts(observation, view.metrics)}
+                ${this.renderReadouts(observation, entry.metrics)}
             </div>`;
     }
 
     /**
      * The station switcher. Offline stations stay listed but disabled, so the
      * page says which station is missing rather than hiding it.
-     * @param {Object[]} views - Every station, online or not
-     * @param {Object} lapseRateInfo - Lapse rate info, shown alongside the tabs
-     * @param {Object} stations - Per-station online flags
+     * @param {Object[]} loaded - Station entries in tab order, online or not
      * @returns {string} HTML markup
      */
-    renderTabs(views, lapseRateInfo, stations) {
+    renderTabs(loaded) {
         return `
             <div class="tab-row">
-            <div class="tabs" role="tablist" aria-label="Weather station">
-                ${views.map(view => `
-                    <button class="tab" type="button" role="tab" id="tab-${view.key}"
-                            aria-controls="panel-${view.key}" aria-selected="false"
-                            data-view="${view.key}" tabindex="-1"
-                            ${view.observation ? '' : 'disabled'}>
-                        <span class="tab-name">${view.name}</span>
-                        <span class="tab-meta">${view.station.id}${
-                            view.observation
-                                ? ` &middot; ${Number(view.observation.uk_hybrid.elev).toLocaleString()} ft`
-                                : ' &middot; offline'
-                        }</span>
-                    </button>`).join('')}
-            </div>
+                <div class="tabs" role="tablist" aria-label="Weather station">
+                    ${loaded.map(entry => `
+                        <button class="tab" type="button" role="tab" id="tab-${entry.station.key}"
+                                aria-controls="panel-${entry.station.key}" aria-selected="false"
+                                data-view="${entry.station.key}" tabindex="-1"
+                                ${entry.online ? '' : 'disabled'}>
+                            <span class="tab-name">${entry.station.name}</span>
+                            <span class="tab-meta">${entry.station.id}${
+                                entry.online
+                                    ? ` &middot; ${Number(entry.observation.uk_hybrid.elev).toLocaleString()} ft`
+                                    : ' &middot; offline'
+                            }</span>
+                        </button>`).join('')}
+                </div>
 
-            ${this.renderLapseTag(lapseRateInfo, stations)}
+                ${this.renderLapseTag(loaded)}
             </div>`;
     }
 
@@ -362,7 +353,7 @@ export class Index {
             });
         });
 
-        this.activateView(enabled[0].key, lookup);
+        this.activateView(enabled[0].station.key, lookup);
     }
 
     /**
@@ -374,50 +365,41 @@ export class Index {
         const lastUpdatedElement = document.getElementById('last-updated');
 
         try {
-            const data = await weather.loadWeatherData(LAUNCH_STATION, GROUND_STATION);
-            const stations = data.stations;
+            const site = await sites.site(sites.slugFromPage());
+            const ordered = sites.inTabOrder(site.stations);
+            const loaded = await weather.loadStations(ordered);
 
-            const views = [
-                {
-                    key: 'launch',
-                    name: 'Launch',
-                    station: stations.launch,
-                    observation: data.observation,
-                    metrics: data
-                },
-                {
-                    key: 'ground',
-                    name: 'Landing zone',
-                    station: stations.ground,
-                    observation: data.groundObservation,
-                    metrics: data.groundMetrics
-                }
-            ];
+            document.title = site.name;
+            const wordmark = document.querySelector('.wordmark');
+            if (wordmark) wordmark.textContent = site.name;
 
-            // Whichever stations answered. One being dark never hides the other.
-            const enabled = views.filter(view => view.observation);
+            // Whichever stations answered. One being dark never hides the others.
+            const enabled = loaded.filter(entry => entry.online);
 
             if (!enabled.length) {
                 lastUpdatedElement.textContent = 'no signal';
                 weatherDataContainer.innerHTML = `
                     <div class="state">
-                        <p class="state-title">Both stations are dark</p>
-                        <p>Neither ${LAUNCH_STATION} nor ${GROUND_STATION} is reporting. Try
-                           <a href="https://wunderground.com/dashboard/pws/${LAUNCH_STATION}" target="_blank" rel="noopener">the launch station on Weather Underground</a>.</p>
+                        <p class="state-title">Every station is dark</p>
+                        <p>None of ${loaded.map(entry => entry.station.id).join(', ')} is reporting. Try
+                           <a href="https://wunderground.com/dashboard/pws/${loaded[0].station.id}" target="_blank" rel="noopener">${loaded[0].station.name} on Weather Underground</a>.</p>
                     </div>`;
                 return;
             }
 
-            const notice = enabled.length < views.length
-                ? `<p class="notice">${views.find(v => !v.observation).station.id} is offline. Showing ${enabled[0].station.id} only.</p>`
+            const offline = loaded.filter(entry => !entry.online).map(entry => entry.station.name);
+            const notice = offline.length
+                ? `<p class="notice">${offline.join(' and ')} ${offline.length > 1 ? 'are' : 'is'} offline. Showing the ${
+                    enabled.length > 1 ? 'remaining stations' : 'one station still reporting'
+                }.</p>`
                 : '';
 
             weatherDataContainer.innerHTML =
                 notice +
-                this.renderTabs(views, data.lapseRateInfo, stations) +
-                enabled.map(view => this.renderStationView(view)).join('');
+                this.renderTabs(loaded) +
+                enabled.map(entry => this.renderStationView(entry)).join('');
 
-            const lookup = Object.fromEntries(enabled.map(view => [view.key, view]));
+            const lookup = Object.fromEntries(enabled.map(entry => [entry.station.key, entry]));
             this.bindTabs(enabled, lookup);
 
         } catch (error) {

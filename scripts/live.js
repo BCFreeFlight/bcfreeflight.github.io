@@ -1,4 +1,5 @@
 import weather from './weather.js';
+import sites from './sites.js';
 import * as readings from './readings.js';
 
 // Remembered across the page's own periodic reloads.
@@ -247,30 +248,66 @@ export class Live {
      */
     async loadAndDisplayWeatherOverlay() {
         try {
-            const launchLocation = 'ILUMBY7';
-            const groundLocation = 'ILUMBY8';
-            const weatherData = await weather.loadWeatherData(launchLocation, groundLocation, 60 * 10);
+            const site = await sites.site(sites.slugFromPage());
+            const loaded = await weather.loadStations(site.stations);
 
-            if (weatherData && weatherData.observation) {
-                const observation = weatherData.observation;
+            // The overlay speaks for the site's default station; lapse rate
+            // spans every station, so it is drawn from the whole set.
+            const primary = loaded.find(entry => entry.station.isDefault && entry.online)
+                ?? loaded.find(entry => entry.online);
 
-                const wind = readings.wind(observation);
-                const lapse = readings.lapse(weatherData.lapseRateInfo);
+            this.renderLapseTile(readings.lapseSegments(loaded));
 
-                // Wind: direction and speed read as one value, gust in the title.
-                // The rotation already accounts for the wind blowing *from* the
-                // cardinal shown, so the arrow points away from it.
-                this.setReading('#wind', wind.summary, wind.gustSummary);
-                document.querySelector('#wind .weather-icon').style =
-                    `transform: rotate(${wind.rotation}deg);`;
+            if (!primary) return;
 
-                this.setReading('#temperature', readings.temperature(observation).summary);
-                this.setReading('#rainfall', readings.rainfall(observation).summary);
-                this.setReading('#lapse-rate', lapse.summary, lapse.title);
-            }
+            const observation = primary.observation;
+            const wind = readings.wind(observation);
+
+            // Wind: direction and speed read as one value, gust in the title.
+            // The rotation already accounts for the wind blowing *from* the
+            // cardinal shown, so the arrow points away from it.
+            this.setReading('#wind', wind.summary, wind.gustSummary);
+            document.querySelector('#wind .weather-icon').style =
+                `transform: rotate(${wind.rotation}deg);`;
+
+            this.setReading('#temperature', readings.temperature(observation).summary,
+                `Temperature at ${primary.station.name}`);
+            this.setReading('#rainfall', readings.rainfall(observation).summary);
         } catch (error) {
             console.error("Error updating weather overlay:", error);
         }
+    }
+
+    /**
+     * Draws the lapse rate as a single tile, with one row per segment stacked
+     * inside it. Keeping it to one tile matches the weather page and stops the
+     * overlay from growing a column every time a station is added.
+     * @param {Object[]} segments - Segments from readings.lapseSegments
+     * @returns {void}
+     */
+    renderLapseTile(segments) {
+        const overlay = document.getElementById('weather-overlay');
+        if (!overlay) return;
+
+        overlay.querySelectorAll('.weather-item--lapse').forEach(tile => tile.remove());
+
+        const body = segments.length
+            ? `<div class="lapse-stack">
+                   ${segments.map(segment => `
+                       <div class="lapse-row" title="${segment.name}: ${segment.description}">
+                           <span class="lapse-chip" style="background: ${segment.colour};" aria-hidden="true"></span>
+                           <span class="lapse-rate">${segment.rate}</span>
+                           <span class="lapse-leg">${segment.span}</span>
+                       </div>`).join('')}
+               </div>`
+            : `<div class="weather-value">${readings.NO_READING}</div>`;
+
+        overlay.insertAdjacentHTML('beforeend', `
+            <div class="weather-item weather-item--lapse">
+                <i class="material-symbols weather-icon">elevation</i>
+                ${body}
+                <div class="weather-title">Lapse Rate &middot; ºC/1000 ft</div>
+            </div>`);
     }
 }
 

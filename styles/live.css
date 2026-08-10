@@ -210,6 +210,41 @@ body[data-weather="hidden"] #weather-dock {
     text-align: center;
 }
 
+/* Lapse rate is one tile with a row per segment, so adding a station adds a
+   line rather than another column. */
+.lapse-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.lapse-row {
+    display: grid;
+    grid-template-columns: 4px auto 1fr;
+    align-items: baseline;
+    gap: 0 .4rem;
+    text-align: left;
+}
+
+.lapse-chip {
+    align-self: stretch;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, .6);
+}
+
+.lapse-rate {
+    font-size: 1.15rem;
+    font-weight: bold;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.lapse-leg {
+    font-size: .78rem;
+    opacity: .8;
+    white-space: nowrap;
+}
+
 .visually-hidden {
     position: absolute;
     width: 1px; height: 1px;
@@ -246,15 +281,28 @@ body[data-weather="hidden"] #weather-dock {
         opacity: .75;
     }
 
+    /* The lapse tile carries two rows, so it needs more of the strip than the
+       single-figure tiles beside it. */
+    .weather-item--lapse { flex: 1.7 1 0; }
+
+    .lapse-rate { font-size: .8rem; }
+    .lapse-leg { font-size: .52rem; }
+    .lapse-row { grid-template-columns: 3px auto 1fr; gap: 0 .25rem; }
+
     #weather-dock { --control-size: 38px; }
 
     .control .material-symbols { font-size: 19px; }
 }
 
-/* Very narrow phones: drop the gust and elevation detail rather than wrap. */
-@media (orientation: portrait) and (max-width: 360px) {
+/* Very narrow phones: drop the leg names rather than let the strip overflow.
+   The rows stay ordered highest-first and keep their band colours, and the
+   full wording is still on the tooltip. */
+@media (orientation: portrait) and (max-width: 430px) {
     .weather-value { font-size: .72rem; }
     .weather-title { font-size: .52rem; }
+    .lapse-leg { display: none; }
+    .lapse-row { grid-template-columns: 3px auto; }
+    .weather-item--lapse { flex: 1 1 0; }
 }
 
 /* Desktop landscape: 2x sizes. Gated on height so a phone turned sideways
@@ -324,6 +372,10 @@ body[data-weather="hidden"] #weather-dock {
         line-height: 1.2;
         opacity: .75;
     }
+
+    .weather-item--lapse { flex-direction: column; align-items: center; }
+    .lapse-rate { font-size: .85rem; }
+    .lapse-leg { font-size: .58rem; }
 
     .control .material-symbols { font-size: 18px; }
 }

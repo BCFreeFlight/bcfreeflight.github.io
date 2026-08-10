@@ -192,41 +192,28 @@ export class Weather {
     }
 
     /**
-     * Loads weather data for the specified launch location and optionally for the ground location.
+     * Loads every station of a site.
      *
-     * @param {string} launchLocation - The location for which to load launch weather data.
-     * @param {?string} [groundLocation=null] - The optional location for which to load ground weather data.
-     * @param launchCacheTimeoutSeconds - The cache timeout for the launch site
-     * @param groundCacheTimeout - The cache timeout for the ground site (typically used for lapse rate calculations)
-     * @return {Promise<Object>} An object containing weather data including observations, lapse rate information, UV index,
-     * barometric pressure, and dew point. Returns null or undefined values for properties if no data is available.
+     * Stations are fetched and interpreted independently, each with its own
+     * cache timeout, so one going dark never takes the others down with it.
+     * Each station keeps its configuration alongside its reading, which is what
+     * lets the pages stay free of hardcoded station ids.
+     *
+     * @param {Object[]} stations - Normalised stations from the site configuration
+     * @return {Promise<Object[]>} One entry per station: station, observation, metrics, online
      */
-    async loadWeatherData(launchLocation, groundLocation = null, launchCacheTimeoutSeconds = 60, groundCacheTimeout = 60*30) {
-        // The two stations are fetched and interpreted independently, so one
-        // going dark never takes the other down with it.
-        const [launchWeather, lzWeather] = await Promise.all([
-            this.safeGetWeather(launchLocation, launchCacheTimeoutSeconds), // 60-second cache
-            groundLocation
-                ? this.safeGetWeather(groundLocation, groundCacheTimeout)   // 30-minute cache
-                : Promise.resolve(null)
-        ]);
+    async loadStations(stations) {
+        return Promise.all(stations.map(async station => {
+            const data = await this.safeGetWeather(station.id, station.cacheSeconds);
+            const observation = this.firstObservation(data);
 
-        const observation = this.firstObservation(launchWeather);
-        const groundObservation = this.firstObservation(lzWeather);
-        const lapseRateInfo = this.calculateLapseRate(launchWeather, lzWeather);
-        const metrics = this.describeObservation(observation);
-
-        return {
-            observation,
-            groundObservation,
-            groundMetrics: this.describeObservation(groundObservation),
-            lapseRateInfo,
-            stations: {
-                launch: {id: launchLocation, online: Boolean(observation)},
-                ground: {id: groundLocation, online: Boolean(groundObservation)}
-            },
-            ...metrics
-        }
+            return {
+                station,
+                observation,
+                metrics: this.describeObservation(observation),
+                online: Boolean(observation)
+            };
+        }));
     }
 
     /**
@@ -326,25 +313,27 @@ export class Weather {
     }
 
     /**
-     * Calculates the temperature lapse rate between two locations
-     * @param {Object} primaryData - Weather data from primary location
-     * @param {Object} lapsData - Weather data from laps location
-     * @returns {Object} Object containing lapse rate (°C/km) and elevation difference (m)
+     * Calculates the temperature lapse rate between two observations.
+     *
+     * Which one is higher is decided by their reported elevation rather than by
+     * the order they arrive in, so callers can hand over any pair.
+     *
+     * @param {?Object} a - One station's observation
+     * @param {?Object} b - The other station's observation
+     * @returns {Object} lapseRate, elevDiff and the matching stability band
      */
-    calculateLapseRate(primaryData, lapsData) {
-        const primaryObs = this.firstObservation(primaryData);
-        const lapsObs = this.firstObservation(lapsData);
-
+    calculateLapseRate(a, b) {
         // Needs both stations. Keep the shape stable so callers can render a
         // placeholder without null-checking every nested field.
-        if (!primaryObs || !lapsObs) {
+        if (!a?.uk_hybrid || !b?.uk_hybrid) {
             return {lapseRate: null, elevDiff: null, details: null};
         }
 
-        const elevDiffFeet = lapsObs.uk_hybrid.elev - primaryObs.uk_hybrid.elev;
-        const elevDiffThousandFeet = Math.abs(elevDiffFeet / 1000);
-        const tempDiff = primaryObs.uk_hybrid.temp - lapsObs.uk_hybrid.temp;
-        const lapseRate = elevDiffThousandFeet < 0.001 ? 0 : tempDiff / elevDiffThousandFeet;
+        const [upper, lower] = a.uk_hybrid.elev >= b.uk_hybrid.elev ? [a, b] : [b, a];
+        const elevDiffFeet = upper.uk_hybrid.elev - lower.uk_hybrid.elev;
+        const elevDiffThousandFeet = elevDiffFeet / 1000;
+        const tempDiff = lower.uk_hybrid.temp - upper.uk_hybrid.temp;
+        const lapseRate = elevDiffThousandFeet < 0.001 ? 0 : -(tempDiff / elevDiffThousandFeet);
         const lapseDetails = this.lapseSummaries.find(s => lapseRate <= s.max);
 
         return {

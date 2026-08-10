@@ -86,7 +86,41 @@ export function precipitationRate(observation) {
 }
 
 /**
- * Lapse rate between the two stations. Needs both, so it carries its own
+ * Lapse rate for each adjacent pair of stations, highest first.
+ *
+ * Stations are ordered by the elevation they report rather than by their place
+ * in the configuration, so the segments always read downhill: Silver Star to
+ * Launch, then Launch to the Landing Zone. A station that is offline drops out
+ * and its neighbours pair up, so two live stations still give one segment.
+ *
+ * @param {Object[]} loaded - Station entries from Weather.loadStations
+ * @returns {Object[]} One segment per adjacent pair, each with its own wording
+ */
+export function lapseSegments(loaded) {
+    const ranked = loaded
+        .filter(entry => entry.online && entry.observation?.uk_hybrid?.elev !== undefined)
+        .sort((a, b) => b.observation.uk_hybrid.elev - a.observation.uk_hybrid.elev);
+
+    const segments = [];
+
+    for (let i = 0; i < ranked.length - 1; i++) {
+        const upper = ranked[i];
+        const lower = ranked[i + 1];
+        const reading = lapse(weather.calculateLapseRate(upper.observation, lower.observation));
+
+        segments.push({
+            ...reading,
+            from: upper.station.name,
+            to: lower.station.name,
+            span: `${upper.station.name} → ${lower.station.name}`
+        });
+    }
+
+    return segments;
+}
+
+/**
+ * Lapse rate between two stations. Needs both, so it carries its own
  * unavailable state rather than throwing on a missing half.
  * @param {?Object} lapseRateInfo - Lapse rate info from the weather service
  * @returns {Object} available, rate, elevDiff, name, description and wordings
