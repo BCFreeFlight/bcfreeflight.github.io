@@ -3,7 +3,7 @@ import {SERIES} from '../scripts/config/series.js';
 import {History} from '../scripts/history.js';
 import {buildWindgram, FEET} from '../scripts/rasp.js';
 import {Windgram} from '../scripts/windgram.js';
-import {barbCounts, barbPath, MAXIMUM} from '../scripts/lib/barb.js';
+import {barbCounts, barbPath, PENNANT, MAXIMUM_FEATHERS, CALM_RINGS} from '../scripts/lib/barb.js';
 import {sunHeight, clearSky, shadeFraction} from '../scripts/lib/solar.js';
 import {temperatureAt, thermalTop, updraft, DRY_ADIABAT} from '../scripts/lib/thermal.js';
 import {CEILING, COLUMN_MS, STRIPS} from '../scripts/config/rasp.js';
@@ -114,71 +114,153 @@ function profile(lower, upper) {
 }
 
 describe('wind barbs', () => {
+    /**
+     * @param {number} speed - Wind speed, in km/h
+     * @returns {Object} pennants, feathers and halves, without the calm flag
+     */
+    const marks = speed => {
+        const {pennants, feathers, halves} = barbCounts(speed);
+        return {pennants, feathers, halves};
+    };
+
     // The scale, written out exactly as it is read off the drawing.
     const SCALE = [
-        [0, 0, 0, 'no barb at all'],
-        [5, 0, 1, 'a half barb'],
-        [10, 1, 0, 'a full barb'],
-        [15, 1, 1, 'a full barb and a half'],
-        [20, 2, 0, 'two full barbs'],
-        [25, 2, 1, 'two full barbs and a half'],
-        [30, 3, 0, 'three full barbs']
+        [5, {pennants: 0, feathers: 0, halves: 1}, 'one half feather'],
+        [10, {pennants: 0, feathers: 1, halves: 0}, 'one full feather'],
+        [15, {pennants: 0, feathers: 1, halves: 1}, 'a full feather and a half'],
+        [20, {pennants: 0, feathers: 2, halves: 0}, 'two full feathers'],
+        [25, {pennants: 0, feathers: 2, halves: 1}, 'two full feathers and a half'],
+        [30, {pennants: 0, feathers: 3, halves: 0}, 'three full feathers']
     ];
 
-    SCALE.forEach(([speed, feathers, halves, notation]) => {
+    SCALE.forEach(([speed, expected, notation]) => {
         it(`draws ${notation} for ${speed} km/h`, () => {
-            equal(barbCounts(speed), {feathers, halves});
+            equal(marks(speed), expected);
         });
     });
 
-    it('stops at three full barbs, which means thirty or more', () => {
-        [30, 35, 60, 120].forEach(speed => {
-            equal(barbCounts(speed), {feathers: 3, halves: 0}, `${speed} km/h`);
+    it('calls nothing at all a calm', () => {
+        equal(barbCounts(0).calm, true);
+        equal(barbCounts(2).calm, true, 'and anything that rounds to nothing');
+        equal(barbCounts(5).calm, false);
+    });
+
+    it('draws no staff for a calm, because a calm has no direction', () => {
+        equal(barbPath(0), '');
+    });
+
+    it('marks a calm with two rings instead', () => {
+        equal(CALM_RINGS.length, 2);
+        ok(CALM_RINGS[0] < CALM_RINGS[1], 'one inside the other');
+    });
+
+    it('holds at three full feathers from thirty until the pennant', () => {
+        [30, 35, 40, 65, 85].forEach(speed => {
+            equal(marks(speed), {pennants: 0, feathers: MAXIMUM_FEATHERS, halves: 0}, `${speed} km/h`);
         });
+    });
+
+    it('gives way to a pennant at ninety', () => {
+        equal(marks(PENNANT), {pennants: 1, feathers: 0, halves: 0});
+        equal(marks(120), {pennants: 1, feathers: 0, halves: 0});
+        equal(marks(PENNANT - 5), {pennants: 0, feathers: MAXIMUM_FEATHERS, halves: 0});
+    });
+
+    it('fills the pennant, and nothing else', () => {
+        ok(barbPath(PENNANT).includes('Z'), 'the pennant is a closed path');
+        [5, 10, 20, 30].forEach(speed =>
+            ok(!barbPath(speed).includes('Z'), `${speed} km/h is open lines`));
     });
 
     it('rounds to the nearest five, because there is no mark for seven', () => {
-        equal(barbCounts(7), barbCounts(5));
-        equal(barbCounts(8), barbCounts(10));
-        equal(barbCounts(2), barbCounts(0));
-        equal(barbCounts(3), barbCounts(5));
+        equal(marks(7), marks(5));
+        equal(marks(8), marks(10));
+        equal(barbPath(8), barbPath(10), 'and draws them identically');
+        equal(marks(3), marks(5));
     });
 
     it('rounds half a step up, as arithmetic does', () => {
-        equal(barbCounts(2.5), barbCounts(5));
-        equal(barbCounts(12.5), barbCounts(15));
+        equal(marks(2.5), marks(5));
+        equal(marks(12.5), marks(15));
     });
 
-    it('draws a bare shaft for a calm', () => {
-        // No feather means no wind, so there is exactly one line and no more.
-        equal(barbPath(0), 'M0 0L0 -21');
-    });
-
-    it('always draws the shaft, whatever the speed', () => {
-        [0, 5, 15, 30, 90].forEach(speed => {
-            ok(barbPath(speed).startsWith('M0 0L0 -'), `${speed} km/h has a shaft`);
+    it('draws a staff at every speed that is not a calm', () => {
+        [5, 10, 15, 30, PENNANT].forEach(speed => {
+            ok(barbPath(speed).startsWith('M0 0L0 -'), `${speed} km/h has a staff`);
         });
     });
 
-    it('draws one stroke per feather, on top of the shaft', () => {
+    it('draws one stroke per mark, on top of the staff', () => {
         // Each mark is its own subpath, so counting moves counts marks.
         const strokes = speed => barbPath(speed).split('M').length - 1;
 
-        equal(strokes(0), 1, 'shaft only');
-        equal(strokes(5), 2, 'shaft and a half feather');
-        equal(strokes(20), 3, 'shaft and two feathers');
-        equal(strokes(25), 4, 'shaft, two feathers and a half');
-        equal(strokes(MAXIMUM), 4, 'shaft and three feathers');
+        equal(strokes(5), 2, 'staff and a half feather');
+        equal(strokes(20), 3, 'staff and two feathers');
+        equal(strokes(25), 4, 'staff, two feathers and a half');
+        equal(strokes(30), 4, 'staff and three feathers');
     });
 
-    it('has no pennant at any speed', () => {
-        // A closed subpath would be a pennant; the scale stops before one.
-        [30, 50, 100].forEach(speed => ok(!barbPath(speed).includes('Z'), `${speed} km/h`));
+    /**
+     * Where each mark sits along the staff, and how far it reaches out. Read
+     * off the path rather than hard-coded, so the geometry can be retuned
+     * without rewriting the assertions.
+     * @param {number} speed - Wind speed, in km/h
+     * @returns {Object} staff length, and each mark's offset and reach
+     */
+    function geometry(speed) {
+        const path = barbPath(speed);
+        const moves = path.split('M').filter(Boolean);
+
+        return {
+            staff: parseFloat(path.match(/^M0 0L0 -([\d.]+)/)[1]),
+            marks: moves.slice(1).map(move => ({
+                offset: Math.abs(parseFloat(move.split('L')[0].split(' ')[1])),
+                reach: parseFloat(move.split('L')[1].split(' ')[0])
+            }))
+        };
+    }
+
+    it('puts a lone half feather at the tail, not stepped in behind a gap', () => {
+        equal(geometry(5).marks[0].offset, geometry(10).marks[0].offset,
+            'the same slot a full feather would take');
     });
 
-    it('steps a lone half feather in off the tail, so it cannot read as a full one', () => {
-        ok(!barbPath(5).includes('M0 -21.0L'), 'the half is not in the end slot');
-        ok(barbPath(10).includes('M0 -21.0L'), 'a full feather is');
+    it('tells a half feather from a full one by its length', () => {
+        // Which is what lets a lone half sit in the outermost slot at all.
+        // The tolerance is the path's own: coordinates are written to one
+        // decimal, so half of 9.5 cannot come back as exactly 4.75.
+        close(geometry(5).marks[0].reach, geometry(10).marks[0].reach / 2, 0.06);
+    });
+
+    it('carries the staff past the outermost feather', () => {
+        // Without this the feather joined the end of the staff at a corner and
+        // the two read as one bent line: a ten kilometre wind came out as an
+        // "L" rather than as a staff with a feather on it.
+        [10, 20, 30].forEach(speed => {
+            const {staff, marks: on} = geometry(speed);
+            ok(staff > on[0].offset + 2,
+                `${speed} km/h: staff ${staff} should overhang its feather at ${on[0].offset}`);
+        });
+    });
+
+    it('stands the feathers off the staff at 120 degrees', () => {
+        const {marks: on} = geometry(10);
+        const [mark] = on;
+
+        // The feather runs from its offset up the staff and outward; the angle
+        // from the staff's own outward direction is what makes that 120º.
+        const along = parseFloat(barbPath(10).split('M')[2].split('L')[1].split(' ')[1]) * -1 - mark.offset;
+        const degrees = Math.atan2(mark.reach, along) * 180 / Math.PI;
+
+        close(180 - degrees, 120, 0.5);
+    });
+
+    it('stacks the feathers down the staff, heaviest first', () => {
+        const {marks: on} = geometry(25);
+
+        ok(on[0].offset > on[1].offset, 'second feather sits below the first');
+        ok(on[1].offset > on[2].offset, 'and the half below both');
+        close(on[2].reach, on[0].reach / 2, 0.06, 'the half is the short one');
     });
 });
 

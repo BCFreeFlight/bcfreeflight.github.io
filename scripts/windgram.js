@@ -3,8 +3,9 @@ import {
 } from './config/rasp.js';
 import {LAPSE} from './config/bands.js';
 import {FEET} from './rasp.js';
-import {barbPath} from './lib/barb.js';
+import {barbPath, barbCounts, CALM_RINGS} from './lib/barb.js';
 import {escape} from './lib/markup.js';
+import {pointAt} from './config/compass.js';
 
 /**
  * The windgram, drawn.
@@ -531,9 +532,16 @@ export class Windgram {
                 const y = this.y(level.elevation + lift);
                 const at = `${x.toFixed(1)} ${y.toFixed(1)}`;
 
-                // The shaft is drawn pointing up and turned to the bearing the
-                // wind is coming from, which is what the reading names. A calm
-                // still gets one: a bare shaft is the mark for no wind.
+                // A calm has no direction worth pointing at, so it is marked
+                // by rings rather than by a staff aimed down an average of
+                // nothing.
+                if (barbCounts(level.windSpeed).calm) {
+                    marks.push({calm: true, x: x.toFixed(1), y: y.toFixed(1)});
+                    return;
+                }
+
+                // The staff is drawn pointing up and turned to the bearing the
+                // wind is coming from, which is what the reading names.
                 marks.push({
                     d: barbPath(level.windSpeed),
                     transform: `translate(${at}) rotate(${level.windDir.toFixed(0)})`
@@ -545,8 +553,11 @@ export class Windgram {
          * @param {string} kind - The class suffix, halo or nothing
          * @returns {string} Every mark drawn in one pass
          */
-        const pass = kind => marks.map(mark =>
-            `<path class="windgram-barb${kind}" d="${mark.d}" transform="${mark.transform}"></path>`
+        const pass = kind => marks.map(mark => mark.calm
+            ? CALM_RINGS.map(radius =>
+                `<circle class="windgram-calm${kind}" cx="${mark.x}" cy="${mark.y}" r="${radius}"></circle>`
+            ).join('')
+            : `<path class="windgram-barb${kind}" d="${mark.d}" transform="${mark.transform}"></path>`
         ).join('');
 
         // Every halo first, then every barb: drawn barb by barb, one mark's
@@ -785,6 +796,22 @@ export class Windgram {
 
         const clock = new Date(column.time).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
 
+        // Highest station first, so the list reads down the column of air the
+        // same way the panel does.
+        const winds = [...column.levels].reverse().map(level => {
+            const station = this.model.stations.find(entry => entry.key === level.key);
+            const name = station?.shortName ?? station?.name ?? '';
+
+            if (level.windSpeed === null) return `${name} —`;
+
+            // The number behind the barb. A barb is read to the nearest five by
+            // design, so without this there is no way to tell a rounded-down
+            // nine from a rounded-up eleven.
+            const heading = level.windDir === null ? '' : ` ${pointAt(level.windDir).abbr}`;
+
+            return `${name} ${level.windSpeed.toFixed(0)} km/h${heading}`;
+        });
+
         const lines = [
             clock,
             column.thermalTop === null
@@ -792,7 +819,8 @@ export class Windgram {
                 : `Top ${Math.round(column.thermalTop).toLocaleString()} m`,
             column.lift === null ? null : `Lift ${column.lift.toFixed(1)} m/s`,
             column.shade === null ? null : `Shade ${Math.round(column.shade * 100)}%`,
-            column.cloudBase === null ? null : `Base ${Math.round(column.cloudBase).toLocaleString()} m`
+            column.cloudBase === null ? null : `Base ${Math.round(column.cloudBase).toLocaleString()} m`,
+            ...winds
         ].filter(Boolean);
 
         // Flipped to the other side of the crosshair before it would run off

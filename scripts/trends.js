@@ -67,8 +67,8 @@ export class Trends {
                                     aria-pressed="${this.mode === 'split'}">Stacked</button>
                             <button class="trend-mode" type="button" data-mode="combined"
                                     aria-pressed="${this.mode === 'combined'}">Overlay</button>
-                            <button class="trend-mode" type="button" data-mode="rasp"
-                                    aria-pressed="${this.mode === 'rasp'}">RASP</button>
+                            <button class="trend-mode" type="button" data-mode="windgram"
+                                    aria-pressed="${this.mode === 'windgram'}">Windgram</button>
                         </div>
                     </div>
                 </div>
@@ -326,13 +326,13 @@ export class Trends {
 
         // The windgram is not a selection of measurements, so its mode hides
         // the picker rather than leaving a control that changes nothing.
-        const rasp = this.mode === 'rasp';
+        const profile = this.mode === 'windgram';
 
-        panel.host.querySelector('.chart-host').hidden = rasp;
-        panel.host.querySelector('.windgram-host').hidden = !rasp;
-        panel.host.querySelector('.trend-picker').hidden = rasp;
+        panel.host.querySelector('.chart-host').hidden = profile;
+        panel.host.querySelector('.windgram-host').hidden = !profile;
+        panel.host.querySelector('.trend-picker').hidden = profile;
 
-        if (rasp) {
+        if (profile) {
             this.setMenu(panel, false);
             panel.windgram.setModel(this.windgram);
         }
@@ -394,7 +394,7 @@ export class Trends {
     note(panel, day, available) {
         if (!day) return 'No readings logged for today yet.';
 
-        if (this.mode === 'rasp') {
+        if (this.mode === 'windgram') {
             if (!this.windgram) return 'Not enough logged today to draw the profile yet.';
 
             return this.windgram.stations.length < 2

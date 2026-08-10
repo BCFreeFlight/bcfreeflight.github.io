@@ -884,7 +884,9 @@ a { color: var(--accent); }
    that a bare white barb would disappear into them. Drawn as two passes in the
    markup, so no barb's halo lands on its neighbour's white. */
 .windgram-barb,
-.windgram-barb-halo {
+.windgram-barb-halo,
+.windgram-calm,
+.windgram-calm-halo {
     stroke-linecap: round;
     stroke-linejoin: round;
 }
@@ -897,6 +899,19 @@ a { color: var(--accent); }
 
 .windgram-barb {
     fill: #ffffff;
+    stroke: #ffffff;
+    stroke-width: 1.4;
+}
+
+/* A calm: two rings and no staff, because there is no direction in it. */
+.windgram-calm-halo {
+    fill: none;
+    stroke: rgba(17, 24, 39, .55);
+    stroke-width: 3.4;
+}
+
+.windgram-calm {
+    fill: none;
     stroke: #ffffff;
     stroke-width: 1.4;
 }
