@@ -1,0 +1,107 @@
+/**
+ * Site configuration.
+ *
+ * Every site and its stations are described in sites/sites.json. Nothing else
+ * in the app names a station, so adding a site or moving a station is a change
+ * to that file alone.
+ */
+
+// Falls back when a station does not state its own timeout. The station being
+// watched stays fresh; the ones that only feed lapse rate are cheap to hold.
+const DEFAULT_CACHE_SECONDS = 60;
+const REFERENCE_CACHE_SECONDS = 60 * 30;
+
+const CONFIG_URL = new URL('../sites/sites.json', import.meta.url);
+
+export class Sites {
+    constructor() {
+        // One fetch per page load, shared by everything that asks.
+        this.pending = null;
+    }
+
+    /**
+     * Loads the site configuration, reusing the in-flight or completed request.
+     * @returns {Promise<Object>} The parsed configuration
+     */
+    async load() {
+        if (!this.pending) {
+            this.pending = fetch(CONFIG_URL)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Site configuration returned ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .catch(error => {
+                    // Let the next caller try again rather than caching a failure.
+                    this.pending = null;
+                    throw error;
+                });
+        }
+
+        return this.pending;
+    }
+
+    /**
+     * Resolves one site by its slug, with each station normalised.
+     * @param {string} slug - The site key, e.g. "coopers"
+     * @returns {Promise<Object>} slug, name and stations
+     */
+    async site(slug) {
+        const config = await this.load();
+        const site = config?.sites?.[slug];
+
+        if (!site) {
+            throw new Error(`No site named "${slug}" in the site configuration`);
+        }
+
+        return {
+            slug,
+            name: site.name ?? slug,
+            stations: (site.stations ?? []).map((station, index) => this.station(station, index))
+        };
+    }
+
+    /**
+     * Fills in the parts a station may leave out.
+     * @param {Object} station - A station entry from the configuration
+     * @param {number} index - Its position in the site's list
+     * @returns {Object} key, name, id, isDefault and cacheSeconds
+     */
+    station(station, index) {
+        const isDefault = station.default === true;
+
+        return {
+            // Stable enough to use in element ids and to key state by.
+            key: station.wunderground.toLowerCase(),
+            name: station.name ?? station.wunderground,
+            id: station.wunderground,
+            isDefault,
+            order: index,
+            cacheSeconds: station.cacheSeconds
+                ?? (isDefault ? DEFAULT_CACHE_SECONDS : REFERENCE_CACHE_SECONDS)
+        };
+    }
+
+    /**
+     * Reading order for the tabs: the default station leads, the rest follow in
+     * the order the configuration lists them.
+     * @param {Object[]} stations - Normalised stations
+     * @returns {Object[]} A new, ordered array
+     */
+    inTabOrder(stations) {
+        return [...stations].sort((a, b) =>
+            (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0) || a.order - b.order);
+    }
+
+    /**
+     * The site a page belongs to, taken from `data-site` on the body.
+     * @returns {?string} The slug, or null when the page does not declare one
+     */
+    slugFromPage() {
+        return document.body.dataset.site ?? null;
+    }
+}
+
+const sites = new Sites();
+export default sites;

@@ -1,0 +1,25 @@
+{
+  "sites": {
+    "coopers": {
+      "name": "Cooper’s Launch",
+      "stations": [
+        {
+          "default": true,
+          "name": "Launch",
+          "wunderground": "ILUMBY7",
+          "cacheSeconds": 60
+        },
+        {
+          "name": "Landing Zone",
+          "wunderground": "ILUMBY8",
+          "cacheSeconds": 1800
+        },
+        {
+          "name": "Silver Star",
+          "wunderground": "IVERNO71",
+          "cacheSeconds": 1800
+        }
+      ]
+    }
+  }
+}

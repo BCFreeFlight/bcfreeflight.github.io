@@ -6,6 +6,19 @@ body, html {
     background-color: black;
 }
 
+/* Dynamic viewport height, so a collapsing mobile URL bar does not leave a
+   strip of the video cut off below the fold. */
+@supports (height: 100dvh) {
+    body, html { height: 100dvh; }
+}
+
+/* Safe-area insets so controls clear a notch or home indicator. */
+:root {
+    --edge-top: max(10px, env(safe-area-inset-top));
+    --edge-right: max(10px, env(safe-area-inset-right));
+    --edge-bottom: env(safe-area-inset-bottom);
+}
+
 #video-container {
     position: absolute;
     top: 0;
@@ -16,31 +29,157 @@ body, html {
     overflow: hidden;
 }
 
+/* The scroll container. The iframe below sets pointer-events: none, so drags
+   land here and pan the video rather than being swallowed by the player. */
 .video-mask {
     position: relative;
     width: 100%;
     height: 100%;
-    overflow: hidden;
+    overflow: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    display: flex;
+    scrollbar-width: none;
+    /* Let the browser own touch panning (it brings momentum with it); the
+       pointer handlers in live.js only take over for a mouse. */
+    touch-action: pan-x pan-y;
 }
+
+/* Only advertise dragging when there is something to drag to. */
+body[data-pannable="true"] .video-mask { cursor: grab; }
+body[data-pannable="true"] .video-mask.is-dragging { cursor: grabbing; }
+
+.video-mask::-webkit-scrollbar { display: none; }
 
 #video-player {
-    position: absolute;
-    top: -0%;
-    left: -0%;
-    width: 100%;
-    height: 100%;
+    flex: none;
+    border: none;
+    aspect-ratio: 16 / 9;
     pointer-events: none;
+    /* auto margins rather than justify-content: center — centring a flex item
+       that overflows its container makes the leading overflow unreachable. */
+    margin: auto;
 }
 
-#weather-overlay {
+/* --- View modes ----------------------------------------------------------
+   Fill covers the viewport and lets the overflowing axis scroll; fit shows
+   the whole frame and letterboxes. Each mode keys off whether the viewport
+   is wider or narrower than the video itself, so the two are mirror images. */
+
+@media (max-aspect-ratio: 16 / 9) {
+    body[data-view="fill"] #video-player { height: 100%; width: auto; }
+    body[data-view="fit"]  #video-player { width: 100%; height: auto; }
+}
+
+@media (min-aspect-ratio: 16 / 9) {
+    body[data-view="fill"] #video-player { width: 100%; height: auto; }
+    body[data-view="fit"]  #video-player { height: 100%; width: auto; }
+}
+
+/* --- Controls ------------------------------------------------------------- */
+
+.control {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: var(--control-size);
+    height: var(--control-size);
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, .25);
+    border-radius: 50%;
+    background: rgba(0, 0, 0, .45);
+    color: #fff;
+    cursor: pointer;
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    transition: background-color .18s, border-color .18s, opacity .18s;
+}
+
+.control:hover { background: rgba(0, 0, 0, .7); border-color: rgba(255, 255, 255, .5); }
+
+.control:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+.control .material-symbols { font-size: 22px; line-height: 1; }
+
+/* --- Weather overlay ------------------------------------------------------ */
+
+/* The dock slides down far enough to park the readings off-screen while
+   leaving exactly the handle showing, so the control never goes with it. */
+#weather-dock {
+    --handle-h: 26px;
+    --control-size: 44px;
+    --control-inset: 10px;
+    /* The bar has to clear the button plus its inset, or collapsing would
+       shear the button off the bottom edge. */
+    --bar-h: calc(var(--control-size) + var(--control-inset));
     position: absolute;
     bottom: 0;
     left: 0;
     right: 0;
+    z-index: 2;
+    transition: transform .28s ease;
+}
+
+/* Collapsing parks the readings off-screen but leaves the whole control bar
+   showing, so both the handle and the aspect button ride down with it. */
+body[data-weather="hidden"] #weather-dock {
+    transform: translateY(calc(100% - var(--bar-h)));
+}
+
+.dock-bar {
+    display: flex;
+    align-items: flex-end;
+    height: var(--bar-h);
+}
+
+/* Equal-width flanks keep the handle centred regardless of what sits beside it. */
+.dock-side {
+    flex: 1 1 0;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
+
+/* The inset lives on the button, not the flank: padding here would widen this
+   side against the other and knock the handle off centre. */
+.dock-side--end {
+    justify-content: flex-end;
+}
+
+.dock-side--end .control {
+    margin-right: max(var(--control-inset), env(safe-area-inset-right));
+    margin-bottom: var(--control-inset);
+}
+
+.weather-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 64px;
+    height: var(--handle-h);
+    align-self: flex-end;
+    padding: 0;
+    border: none;
+    border-radius: 8px 8px 0 0;
+    background: rgba(0, 0, 0, .5);
+    color: #fff;
+    cursor: pointer;
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    transition: background-color .18s;
+}
+
+.weather-handle:hover { background: rgba(0, 0, 0, .72); }
+
+.weather-handle:focus-visible { outline: 2px solid #fff; outline-offset: -3px; }
+
+.weather-handle .material-symbols { font-size: 22px; line-height: 1; }
+
+#weather-overlay {
     background-color: rgba(0, 0, 0, 0.50);
     color: white;
-    padding: 10px;
-    z-index: 2;
+    padding: 10px 10px calc(10px + var(--edge-bottom));
     display: flex;
     justify-content: space-around;
 }
@@ -50,6 +189,7 @@ body, html {
     flex-direction: column;
     align-items: center;
     padding: 0 15px;
+    min-width: 0;
 }
 
 .weather-icon {
@@ -61,42 +201,115 @@ body, html {
 .weather-value {
     font-size: 1.2rem;
     font-weight: bold;
+    white-space: nowrap;
 }
 
 .weather-title {
     font-size: 0.9rem;
     opacity: 0.8;
+    text-align: center;
 }
 
-/* Mobile and portrait mode: compact styles */
+/* Lapse rate is one tile with a row per segment, so adding a station adds a
+   line rather than another column. */
+.lapse-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.lapse-row {
+    display: grid;
+    grid-template-columns: 4px auto 1fr;
+    align-items: baseline;
+    gap: 0 .4rem;
+    text-align: left;
+}
+
+.lapse-chip {
+    align-self: stretch;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, .6);
+}
+
+.lapse-rate {
+    font-size: 1.15rem;
+    font-weight: bold;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.lapse-leg {
+    font-size: .78rem;
+    opacity: .8;
+    white-space: nowrap;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px; height: 1px;
+    margin: -1px; padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+/* Portrait: keep all four tiles on one row, just smaller, so the video keeps
+   as much height as possible. */
 @media (orientation: portrait) {
     #weather-overlay {
-        flex-wrap: wrap;
+        padding: 8px 4px calc(8px + var(--edge-bottom));
     }
 
     .weather-item {
-        width: 50%;
-        padding: 5px 10px;
-        margin-bottom: 5px;
+        flex: 1 1 0;
+        padding: 0 2px;
     }
 
     .weather-icon {
-        font-size: 1.5rem;
+        font-size: 1.15rem;
+        margin-bottom: 2px;
     }
 
     .weather-value {
-        font-size: 1rem;
+        font-size: .8rem;
     }
 
     .weather-title {
-        font-size: 0.8rem;
+        font-size: .58rem;
+        line-height: 1.2;
+        opacity: .75;
     }
+
+    /* The lapse tile carries two rows, so it needs more of the strip than the
+       single-figure tiles beside it. */
+    .weather-item--lapse { flex: 1.7 1 0; }
+
+    .lapse-rate { font-size: .8rem; }
+    .lapse-leg { font-size: .52rem; }
+    .lapse-row { grid-template-columns: 3px auto 1fr; gap: 0 .25rem; }
+
+    #weather-dock { --control-size: 38px; }
+
+    .control .material-symbols { font-size: 19px; }
 }
 
-/* Desktop landscape: 2x sizes */
-@media (orientation: landscape) {
+/* Very narrow phones: drop the leg names rather than let the strip overflow.
+   The rows stay ordered highest-first and keep their band colours, and the
+   full wording is still on the tooltip. */
+@media (orientation: portrait) and (max-width: 430px) {
+    .weather-value { font-size: .72rem; }
+    .weather-title { font-size: .52rem; }
+    .lapse-leg { display: none; }
+    .lapse-row { grid-template-columns: 3px auto; }
+    .weather-item--lapse { flex: 1 1 0; }
+}
+
+/* Desktop landscape: 2x sizes. Gated on height so a phone turned sideways
+   does not get desktop-sized tiles eating its short viewport. */
+@media (orientation: landscape) and (min-height: 501px) {
     #weather-overlay {
-        padding: 16px 0;
+        padding: 16px 0 calc(16px + var(--edge-bottom));
     }
 
     .weather-item {
@@ -114,4 +327,59 @@ body, html {
     .weather-title {
         font-size: 1.0rem;
     }
+}
+
+/* Phone held sideways: one row, tight, so the strip costs as little height as
+   possible. Controls move clear of the rounded corners. */
+@media (orientation: landscape) and (max-height: 500px) {
+    #weather-dock {
+        --handle-h: 20px;
+        --control-size: 36px;
+        --control-inset: 8px;
+        left: env(safe-area-inset-left);
+        right: env(safe-area-inset-right);
+    }
+
+    .weather-handle .material-symbols { font-size: 18px; }
+
+    #weather-overlay {
+        padding: 6px 10px calc(6px + var(--edge-bottom));
+    }
+
+    .weather-item {
+        flex: 1 1 0;
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+        align-items: baseline;
+        gap: 0 6px;
+        padding: 0 4px;
+    }
+
+    .weather-icon {
+        font-size: 1.1rem;
+        margin-bottom: 0;
+        align-self: center;
+    }
+
+    .weather-value {
+        font-size: .95rem;
+    }
+
+    .weather-title {
+        flex-basis: 100%;
+        font-size: .6rem;
+        line-height: 1.2;
+        opacity: .75;
+    }
+
+    .weather-item--lapse { flex-direction: column; align-items: center; }
+    .lapse-rate { font-size: .85rem; }
+    .lapse-leg { font-size: .58rem; }
+
+    .control .material-symbols { font-size: 18px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #weather-dock { transition: none; }
 }

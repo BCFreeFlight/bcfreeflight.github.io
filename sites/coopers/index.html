@@ -4,38 +4,45 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cooper's Launch</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0"/>
-    <link rel="stylesheet" href="../../styles/app.css">
+    <meta name="description" content="Live wind, thermal, and weather conditions at Cooper's Launch, Lumby BC.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif&display=swap">
+    <link rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,400,0,0">
+    <link rel="stylesheet" href="../../styles/station.css">
 </head>
 
-<body>
-<div class="container-fluid">
-    <div class="row mb-4">
-        <div class="col-12 text-center">
-            <h1 class="display-4">Cooper's Launch</h1>
-            <i class="material-symbols-outlined fs-6">location_on</i>
-            <span id="location" class="card-title"></span>
-            <div>
-                <span id="last-updated" class="card-title"></span>
-                <span>&nbsp;</span>
-                <a class="material-symbols-outlined" href="live" id="live-link">videocam</a>
-            </div>
+<body data-site="coopers">
+<div class="shell">
+    <header class="masthead">
+        <div>
+            <h1 class="wordmark">Cooper&rsquo;s Launch</h1>
+            <span class="station-id" id="location"></span>
         </div>
-    </div>
 
-
-    <div class="row" id="weather-data">
-        <div class="col-12 text-center">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
+        <div class="masthead-aside">
+            <div class="timestamp">
+                <span class="label">Observed</span>
+                <span id="last-updated">&mdash;</span>
             </div>
-            <p>Loading weather data...</p>
+            <a class="live-link" href="live" id="live-link">
+                <span class="live-dot" aria-hidden="true"></span>
+                Live camera
+            </a>
         </div>
-    </div>
+    </header>
+
+    <main id="weather-data">
+        <div class="state">
+            <div class="sweep" aria-hidden="true"></div>
+            <p class="state-title">Reading the station</p>
+            <p>Pulling the latest observation from Lumby.</p>
+        </div>
+    </main>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script type="module">
     import index from '../../scripts/index.js';
 

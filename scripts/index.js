@@ -1,10 +1,361 @@
 import time from './time.js';
 import weather from './weather.js';
+import sites from './sites.js';
+import * as readings from './readings.js';
+
+// Top of the wind bar, in km/h. Anything faster pins the bar full.
+const WIND_SCALE = 40;
+
+// Speed at which the windsock reads fully extended, in km/h.
+const WINDSOCK_FULL = 20;
+
+const NO_READING = readings.NO_READING;
 
 /**
  * Class for handling index page functionality
  */
 export class Index {
+    /**
+     * Build the windsock that sits on the dial. Its mouth faces the wind and the
+     * tail streams downwind, the way a real sock hangs. The sock also fills out
+     * with speed: limp and short when calm, fully extended by WINDSOCK_FULL.
+     * @param {number} rotation - Bearing the tail should stream towards, in degrees
+     * @param {?number} windSpeed - Wind speed in km/h
+     * @returns {string} SVG markup
+     */
+    renderWindsock(rotation, windSpeed) {
+        const cx = 120, cy = 120;
+        const fullLength = 116;
+
+        // Fraction of full extension, so a calm sock reads as a stubby cone.
+        const extension = 0.42 + 0.58 * Math.min((windSpeed ?? 0) / WINDSOCK_FULL, 1);
+        const length = fullLength * extension;
+
+        // Straddle the hub, so a short sock stays centred instead of drifting upwind.
+        const mouthY = cy + length / 2;
+
+        const mouthHalf = 17;
+        const tailHalf = 7;
+        const bandCount = 5;
+
+        const at = step => {
+            const t = step / bandCount;
+            return {
+                y: mouthY - length * t,
+                half: mouthHalf + (tailHalf - mouthHalf) * t
+            };
+        };
+
+        let bands = '';
+        for (let i = 0; i < bandCount; i++) {
+            const from = at(i);
+            const to = at(i + 1);
+            bands += `<path d="M${cx - from.half} ${from.y} L${cx + from.half} ${from.y}
+                               L${cx + to.half} ${to.y} L${cx - to.half} ${to.y} Z"
+                            fill="${i % 2 === 0 ? '#ee6a10' : '#ffffff'}"
+                            stroke="#16202b" stroke-opacity=".35" stroke-width="1"
+                            stroke-linejoin="round"/>`;
+        }
+
+        return `
+            <g class="windsock" style="transform: rotate(${rotation}deg); transform-origin: ${cx}px ${cy}px;">
+                ${bands}
+                <ellipse cx="${cx}" cy="${mouthY}" rx="${mouthHalf}" ry="4"
+                         fill="#ee6a10" stroke="#16202b" stroke-opacity=".35" stroke-width="1"/>
+            </g>`;
+    }
+
+    /**
+     * Build the wind rose: a fixed compass card carrying the windsock.
+     * Ticks every 10°, cardinals at the quarters.
+     * @param {Object} wind - A shared wind reading: cardinal, bearing, rotation
+     * @param {?number} windSpeed - Wind speed in km/h
+     * @returns {string} SVG markup
+     */
+    renderRose(wind, windSpeed) {
+        const cx = 120, cy = 120;
+        const bearing = wind.bearing;
+        let ticks = '';
+
+        for (let deg = 0; deg < 360; deg += 10) {
+            const major = deg % 30 === 0;
+            const outer = 104;
+            const inner = major ? 94 : 99;
+            const rad = (deg - 90) * Math.PI / 180;
+            ticks += `<line x1="${cx + Math.cos(rad) * inner}" y1="${cy + Math.sin(rad) * inner}"
+                            x2="${cx + Math.cos(rad) * outer}" y2="${cy + Math.sin(rad) * outer}"
+                            stroke="${major ? '#c3bcae' : '#ddd8ce'}" stroke-width="${major ? 1.5 : 1}"/>`;
+        }
+
+        const cardinals = [['N', 0], ['E', 90], ['S', 180], ['W', 270]]
+            .map(([letter, deg]) => {
+                const rad = (deg - 90) * Math.PI / 180;
+                return `<text x="${cx + Math.cos(rad) * 78}" y="${cy + Math.sin(rad) * 78}"
+                              text-anchor="middle" dominant-baseline="central"
+                              font-family="Archivo, sans-serif" font-size="13" font-weight="600"
+                              letter-spacing="1" fill="#66707c">${letter}</text>`;
+            }).join('');
+
+        return `
+            <svg class="rose" viewBox="0 0 240 240" role="img"
+                 aria-label="Wind from ${wind.cardinal}, ${bearing} degrees">
+                <circle cx="${cx}" cy="${cy}" r="104" fill="#fbfaf7" stroke="#ddd8ce"/>
+                <circle cx="${cx}" cy="${cy}" r="62" fill="none" stroke="#ddd8ce" stroke-dasharray="2 5"/>
+                ${ticks}
+                ${cardinals}
+                ${this.renderWindsock(wind.rotation, windSpeed)}
+            </svg>`;
+    }
+
+    /**
+     * The lapse-rate tag that rides on the tab bar. Lapse rate is measured
+     * between the two stations, so it sits alongside the tabs rather than
+     * inside one, and it reads the same whichever station is selected.
+     *
+     * The stability band shows as one colour rather than a marker on the full
+     * spectrum: at a glance the answer is the colour, and the legend it used to
+     * carry was more chart than a person needs to read in passing.
+     *
+     * @param {Object[]} loaded - Station entries from Weather.loadStations
+     * @returns {string} HTML markup
+     */
+    renderLapseTag(loaded) {
+        const segments = readings.lapseSegments(loaded);
+
+        if (!segments.length) {
+            const offline = loaded.filter(entry => !entry.online).map(entry => entry.station.name);
+
+            return `
+                <div class="lapse-tag">
+                    <span class="label">Lapse rate</span>
+                    <p class="lapse-sub">${
+                        offline.length ? `${offline.join(' and ')} offline` : 'Needs two stations reporting'
+                    }</p>
+                </div>`;
+        }
+
+        return `
+            <div class="lapse-tag">
+                <span class="label">Lapse rate</span>
+                <div class="lapse-segments">
+                    ${segments.map(segment => `
+                        <div class="lapse-segment" title="${segment.name}: ${segment.description}">
+                            <span class="lapse-swatch" style="background: ${segment.colour};" aria-hidden="true"></span>
+                            <span class="lapse-figure">${segment.rate}</span>
+                            <span class="lapse-span">${segment.span}</span>
+                            <span class="lapse-gap">${segment.elevDiff.toLocaleString()} ft</span>
+                        </div>`).join('')}
+                </div>
+            </div>`;
+    }
+
+    /**
+     * The secondary readings for one station, in reading order.
+     * @param {Object} observation - A station observation
+     * @param {Object} metrics - Interpreted metrics for that same observation
+     * @returns {string} HTML markup
+     */
+    renderReadouts(observation, metrics) {
+        const readoutList = [
+            {
+                label: 'Temperature',
+                icon: 'device_thermostat',
+                value: readings.temperature(observation).celsius,
+                unit: 'ºC'
+            },
+            {
+                label: 'Dew Point',
+                icon: 'opacity',
+                value: metrics.dewPoint?.celsius ?? NO_READING,
+                unit: 'ºC',
+                note: metrics.dewPoint?.description
+            },
+            {
+                label: 'Humidity',
+                icon: 'humidity_percentage',
+                value: metrics.humidity?.percent ?? NO_READING,
+                unit: '%',
+                note: metrics.humidity?.description
+            },
+            {
+                label: 'Heat Index',
+                icon: 'wb_sunny',
+                value: metrics.heatIndex?.celsius ?? NO_READING,
+                unit: 'ºC',
+                note: metrics.heatIndex?.description
+            },
+            {
+                label: 'Wind Chill',
+                icon: 'ac_unit',
+                value: metrics.windChill?.celsius ?? NO_READING,
+                unit: 'ºC',
+                note: metrics.windChill?.description
+            },
+            {
+                label: 'Barometric Pressure',
+                icon: 'speed',
+                value: metrics.barometricPressure?.kPa ?? NO_READING,
+                unit: metrics.barometricPressure ? 'kPa' : '',
+                note: metrics.barometricPressure?.description ?? 'This station does not report pressure.'
+            },
+            {
+                label: 'UV Index',
+                icon: 'light_mode',
+                value: observation.uv ?? NO_READING,
+                note: metrics.uvIndex ? `${metrics.uvIndex.risk} — ${metrics.uvIndex.description}` : undefined
+            },
+            {label: 'Solar Radiation', icon: 'brightness_7', value: observation.solarRadiation ?? NO_READING, unit: 'W/m²'},
+            {
+                label: 'Rainfall',
+                icon: 'water_drop',
+                value: readings.rainfall(observation).millimetres,
+                unit: 'mm',
+                note: 'Total so far today'
+            },
+            {
+                label: 'Precipitation Rate',
+                icon: 'grain',
+                value: readings.precipitationRate(observation).rate,
+                unit: 'mm/hr'
+            }
+        ];
+
+        return `
+            <section class="readouts">
+                ${readoutList.map((item, i) => `
+                    <div class="readout" style="--i: ${i}">
+                        <span class="label"><span class="label-icon" aria-hidden="true">${item.icon}</span>${item.label}</span>
+                        <p class="readout-value${item.value === NO_READING ? ' is-empty' : ''}">${item.value}${item.unit ? `<span class="unit">${item.unit}</span>` : ''}</p>
+                        ${item.note ? `<p class="readout-note">${item.note}</p>` : ''}
+                    </div>`).join('')}
+            </section>`;
+    }
+
+    /**
+     * A full readings panel for one station.
+     * @param {Object} entry - A station entry: station, observation, metrics
+     * @returns {string} HTML markup
+     */
+    renderStationView(entry) {
+        const observation = entry.observation;
+        const key = entry.station.key;
+        const uk = observation.uk_hybrid ?? {};
+        const wind = readings.wind(observation);
+
+        const speedPct = Math.min((uk.windSpeed ?? 0) / WIND_SCALE, 1) * 100;
+        const gustPct = Math.min((uk.windGust ?? 0) / WIND_SCALE, 1) * 100;
+
+        return `
+            <div class="view" id="panel-${key}" role="tabpanel" tabindex="0"
+                 aria-labelledby="tab-${key}" data-view="${key}" hidden>
+                <section class="panel">
+                    <div class="rose-cell">
+                        ${this.renderRose(wind, uk.windSpeed)}
+                    </div>
+
+                    <div class="stat-cell">
+                        <span class="label"><span class="label-icon" aria-hidden="true">air</span>Wind</span>
+
+                        <p class="stat-value">
+                            ${wind.cardinal}
+                            <span class="stat-bearing">${wind.bearing}°</span>
+                        </p>
+
+                        <p class="stat-value stat-value--speed">${wind.speed}<span class="unit">km/h</span></p>
+
+                        <div class="gust-track">
+                            <span class="gust-fill" style="width: ${gustPct}%"></span>
+                            <span class="speed-fill" style="width: ${speedPct}%"></span>
+                        </div>
+                        <div class="gust-scale"><span>0</span><span>${WIND_SCALE}+ km/h</span></div>
+                        <p class="stat-note">Gusting to <strong>${wind.gust} km/h</strong></p>
+                    </div>
+                </section>
+
+                ${this.renderReadouts(observation, entry.metrics)}
+            </div>`;
+    }
+
+    /**
+     * The station switcher. Offline stations stay listed but disabled, so the
+     * page says which station is missing rather than hiding it.
+     * @param {Object[]} loaded - Station entries in tab order, online or not
+     * @returns {string} HTML markup
+     */
+    renderTabs(loaded) {
+        return `
+            <div class="tab-row">
+                <div class="tabs" role="tablist" aria-label="Weather station">
+                    ${loaded.map(entry => `
+                        <button class="tab" type="button" role="tab" id="tab-${entry.station.key}"
+                                aria-controls="panel-${entry.station.key}" aria-selected="false"
+                                data-view="${entry.station.key}" tabindex="-1"
+                                ${entry.online ? '' : 'disabled'}>
+                            <span class="tab-name">${entry.station.name}</span>
+                            <span class="tab-meta">${entry.station.id}${
+                                entry.online
+                                    ? ` &middot; ${Number(entry.observation.uk_hybrid.elev).toLocaleString()} ft`
+                                    : ' &middot; offline'
+                            }</span>
+                        </button>`).join('')}
+                </div>
+
+                ${this.renderLapseTag(loaded)}
+            </div>`;
+    }
+
+    /**
+     * Shows one station's panel and updates the masthead to match it.
+     * @param {string} key - The view key to activate
+     * @param {Object} lookup - View key to its observation and station id
+     * @returns {void}
+     */
+    activateView(key, lookup) {
+        const lastUpdatedElement = document.getElementById('last-updated');
+        const locationElement = document.getElementById('location');
+
+        document.querySelectorAll('.tab').forEach(tab => {
+            const selected = tab.dataset.view === key;
+            tab.setAttribute('aria-selected', String(selected));
+            tab.tabIndex = selected ? 0 : -1;
+        });
+
+        document.querySelectorAll('.view').forEach(panel => {
+            panel.hidden = panel.dataset.view !== key;
+        });
+
+        const active = lookup[key];
+        const uk = active.observation.uk_hybrid ?? {};
+        lastUpdatedElement.textContent = time.format(new Date(active.observation.obsTimeUtc));
+        locationElement.innerHTML =
+            `${active.observation.lat.toFixed(3)}, ${active.observation.lon.toFixed(3)}<span class="sep">/</span>` +
+            `${Number(uk.elev).toLocaleString()} ft<span class="sep">/</span>${active.station.id}`;
+    }
+
+    /**
+     * Wires clicks and left/right arrow keys on the station switcher.
+     * @param {Object[]} enabled - The views that have data
+     * @param {Object} lookup - View key to its observation and station id
+     * @returns {void}
+     */
+    bindTabs(enabled, lookup) {
+        const tabs = [...document.querySelectorAll('.tab:not([disabled])')];
+
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => this.activateView(tab.dataset.view, lookup));
+            tab.addEventListener('keydown', event => {
+                const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+                if (!step) return;
+                event.preventDefault();
+                const next = tabs[(tabs.indexOf(tab) + step + tabs.length) % tabs.length];
+                this.activateView(next.dataset.view, lookup);
+                next.focus();
+            });
+        });
+
+        this.activateView(enabled[0].station.key, lookup);
+    }
+
     /**
      * Process and display weather data
      * @returns {Promise<void>}
@@ -12,157 +363,52 @@ export class Index {
     async processWeather() {
         const weatherDataContainer = document.getElementById('weather-data');
         const lastUpdatedElement = document.getElementById('last-updated');
-        const locationElement = document.getElementById('location');
+
         try {
-            const launchLocation = 'ILUMBY7';
-            const groundLocation = 'ILUMBY2';
-            const weatherData = await weather.loadWeatherData(launchLocation, groundLocation);
+            const site = await sites.site(sites.slugFromPage());
+            const ordered = sites.inTabOrder(site.stations);
+            const loaded = await weather.loadStations(ordered);
 
-            // Update last updated time
-            const lastUpdated = new Date(weatherData.observation.obsTimeUtc);
+            document.title = site.name;
+            const wordmark = document.querySelector('.wordmark');
+            if (wordmark) wordmark.textContent = site.name;
 
-            lastUpdatedElement.textContent = `Last updated: ${time.format(lastUpdated)}`;
-            locationElement.textContent = `Location: ${weatherData.observation.lat.toFixed(3)}, ${weatherData.observation.lon.toFixed(3)} at ${weatherData.observation.uk_hybrid.elev} ft`;
-            // Clear loading indicator
-            weatherDataContainer.innerHTML = '';
-            if (weatherData && weatherData.observation) {
+            // Whichever stations answered. One being dark never hides the others.
+            const enabled = loaded.filter(entry => entry.online);
 
-                // Create weather cards
-                const weatherItems = [
-                    {
-                        title: 'Wind Direction',
-                        value: `${weather.degreesToDirection(weatherData.observation.winddir)}`,
-                        icon: 'navigation',
-                        style: `transform: rotate(${weatherData.observation.winddir + 180}deg);`,
-                        background: `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/${weatherData.observation.lon},${weatherData.observation.lat},14/600x400?access_token=pk.eyJ1IjoiY2hhc2VmbG9yZWxsIiwiYSI6ImNtYmN4bXJnNzEza2cyam42MWNwNmJ5cmIifQ.40BZbxanvherUlpc4RdoFw`,
-                        backgroundType: 'image'
-                    },
-                    {
-                        title: 'Wind Speed (Gust)',
-                        value: `${weatherData.observation.uk_hybrid.windSpeed} km/h (${weatherData.observation.uk_hybrid.windGust} km/h)`,
-                        icon: 'air'
-                    },
-                    {
-                        title: `Lapse Rate: (${weatherData.lapseRateInfo.elevDiff}ft)`,
-                        value: weatherData.lapseRateInfo.lapseRate ? `${weatherData.lapseRateInfo.lapseRate} °C/1000 ft` : 'N/A',
-                        icon: 'elevation',
-                        background: weatherData.lapseRateInfo.details.color,
-                        backgroundType: 'color',
-                        summary: `${weatherData.lapseRateInfo.details.name}`
-                    },
-                    {
-                        title: 'Temperature',
-                        value: `${weatherData.observation.uk_hybrid.temp}ºC`,
-                        icon: 'device_thermostat'
-                    },
-                    {
-                        title: 'Rainfall',
-                        value: `${weatherData.observation.uk_hybrid.precipTotal} mm`,
-                        icon: 'water_drop'
-                    },
-                    {
-                        title: 'Humidity',
-                        value: `${weatherData.humidity.percent}%`,
-                        icon: 'humidity_percentage',
-                        summary: `${weatherData.humidity.description}`
-                    },
-                    {
-                        title: 'Heat Index',
-                        value: `${weatherData.heatIndex.celsius}ºC`,
-                        icon: 'wb_sunny',
-                        summary: `${weatherData.heatIndex.description}`
-                    },
-                    {
-                        title: 'Dew Point',
-                        value: `${weatherData.dewPoint.celsius}ºC`,
-                        icon: 'opacity',
-                        summary: `${weatherData.dewPoint.description}`
-                    },
-                    {
-                        title: 'Wind Chill',
-                        value: `${weatherData.windChill.celsius}ºC`,
-                        icon: 'ac_unit',
-                        summary: `${weatherData.windChill.description}`
-                    },
-                    {
-                        title: 'Barometric Pressure',
-                        value: `${weatherData.barometricPressure.kPa} kPa`,
-                        icon: 'speed',
-                        summary: `${weatherData.barometricPressure.description}`
-                    },
-                    {
-                        title: 'UV Index',
-                        value: `${weatherData.observation.uv}`,
-                        icon: 'light_mode',
-                        summary: `${weatherData.uvIndex.risk}, (${weatherData.uvIndex.description})`
-                    },
-                    {
-                        title: 'Solar Radiation',
-                        value: `${weatherData.observation.solarRadiation} W/m²`,
-                        icon: 'brightness_7'
-                    },
-                    {
-                        title: 'Precipitation Rate',
-                        value: `${weatherData.observation.uk_hybrid.precipRate} mm/hr`,
-                        icon: 'grain'
-                    }
-                ];
-
-                // Render weather cards
-                weatherItems.forEach(item => {
-                    const cardCol = document.createElement('div');
-                    cardCol.className = 'col-6 col-md-3 mb-4';
-
-                    cardCol.innerHTML = `
-                        <div class="card weather-card shadow-sm h-100">
-                            <div class="card-header text-center fw-bold">
-                                ${item.title}
-                            </div>
-
-                            <div class="card-body text-center d-flex flex-column justify-content-between"
-                                ${item.background ?
-                        item.backgroundType === 'image'
-                            ? `style="background-image: url('${item.background}'); background-size: cover; background-position: center;"`
-                            : item.backgroundType === 'color'
-                                ? `style="background-color: ${item.background};"`
-                                : ''
-                        : ''}>
-
-                                <div class="flex-grow-1 d-flex justify-content-center align-items-start">
-                                    <span class="material-symbols-outlined weather-icon" style="${item.style ?? ''}">${item.icon}</span>
-                                </div>
-
-                                <div class="mt-auto">
-                                    <h2 class="card-text text-regular">${item.value}</h2>
-                                    ${item.summary ? `<div class="card-subtext text-muted small">${item.summary}</div>` : ''}
-                                </div>
-                            </div>
-                        </div>
-                    `;
-
-                    weatherDataContainer.appendChild(cardCol);
-                });
-
-            } else {
+            if (!enabled.length) {
+                lastUpdatedElement.textContent = 'no signal';
                 weatherDataContainer.innerHTML = `
-                    <div class="col-12 text-center">
-                        <div class="alert alert-warning" role="alert">
-                            No weather data available, please try again later.</br>
-                            In the meantime, try <a href="https://wunderground.com/dashboard/pws/${launchLocation}" target="_blank">this link</a>
-                        </div>
-                    </div>
-                `;
+                    <div class="state">
+                        <p class="state-title">Every station is dark</p>
+                        <p>None of ${loaded.map(entry => entry.station.id).join(', ')} is reporting. Try
+                           <a href="https://wunderground.com/dashboard/pws/${loaded[0].station.id}" target="_blank" rel="noopener">${loaded[0].station.name} on Weather Underground</a>.</p>
+                    </div>`;
+                return;
             }
+
+            const offline = loaded.filter(entry => !entry.online).map(entry => entry.station.name);
+            const notice = offline.length
+                ? `<p class="notice">${offline.join(' and ')} ${offline.length > 1 ? 'are' : 'is'} offline. Showing the ${
+                    enabled.length > 1 ? 'remaining stations' : 'one station still reporting'
+                }.</p>`
+                : '';
+
+            weatherDataContainer.innerHTML =
+                notice +
+                this.renderTabs(loaded) +
+                enabled.map(entry => this.renderStationView(entry)).join('');
+
+            const lookup = Object.fromEntries(enabled.map(entry => [entry.station.key, entry]));
+            this.bindTabs(enabled, lookup);
 
         } catch (error) {
             console.error("Error in weather app:", error);
             weatherDataContainer.innerHTML = `
-                <div class="col-12 text-center">
-                    <div class="alert alert-danger" role="alert">
-                        Failed to load weather data. Please try again later.
-                    </div>
-                </div>
-            `;
+                <div class="state">
+                    <p class="state-title">Couldn't reach the stations</p>
+                    <p>The weather service didn't answer. Reload in a minute.</p>
+                </div>`;
         }
     }
 }
