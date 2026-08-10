@@ -140,36 +140,36 @@ export class Index {
     }
 
     /**
-     * The lapse-rate cell. It describes the pair of stations rather than either
-     * one, so it reads the same on both tabs and carries its own unavailable
-     * state when a station is missing.
-     * @param {Object} lapse - Lapse rate info from the weather service
+     * The lapse-rate summary. It measures the pair of stations rather than
+     * either one, so it belongs beside the site name rather than inside a
+     * station's tab, and it carries its own unavailable state.
+     * @param {Object} lapseRateInfo - Lapse rate info from the weather service
      * @param {Object} stations - Per-station online flags
      * @returns {string} HTML markup
      */
-    renderLapseCell(lapseRateInfo, stations) {
+    renderLapseSummary(lapseRateInfo, stations) {
         const lapse = readings.lapse(lapseRateInfo);
         const missing = [stations.launch, stations.ground].filter(s => s.id && !s.online);
 
         if (!lapse.available) {
             return `
-                <div class="stat-cell">
-                    <span class="label"><span class="label-icon" aria-hidden="true">elevation</span>Lapse rate</span>
-                    <p class="stat-value is-empty">${NO_READING}</p>
-                    ${this.renderLapseScale(null)}
-                    <p class="stat-note">Needs both stations reporting.${
+                <span class="label"><span class="label-icon" aria-hidden="true">elevation</span>Lapse rate</span>
+                <div class="lapse-head">
+                    <p class="lapse-value is-empty">${NO_READING}</p>
+                    <p class="lapse-note">Needs both stations reporting.${
                         missing.length ? ` ${missing.map(s => s.id).join(' and ')} is offline.` : ''
                     }</p>
-                </div>`;
+                </div>
+                ${this.renderLapseScale(null)}`;
         }
 
         return `
-            <div class="stat-cell">
-                <span class="label"><span class="label-icon" aria-hidden="true">elevation</span>Lapse rate &middot; ${lapse.elevDiff.toLocaleString()} ft split</span>
-                <p class="stat-value">${lapse.rate}<span class="unit">ºC/1000 ft</span></p>
-                ${this.renderLapseScale(lapse.rate)}
-                <p class="stat-note"><span class="lapse-name">${lapse.name}</span> &mdash; ${lapse.description}</p>
-            </div>`;
+            <span class="label"><span class="label-icon" aria-hidden="true">elevation</span>Lapse rate &middot; ${lapse.elevDiff.toLocaleString()} ft launch to LZ</span>
+            <div class="lapse-head">
+                <p class="lapse-value">${lapse.rate}<span class="unit">ºC/1000 ft</span></p>
+                <p class="lapse-note"><span class="lapse-name">${lapse.name}</span><br>${lapse.description}</p>
+            </div>
+            ${this.renderLapseScale(lapse.rate)}`;
     }
 
     /**
@@ -257,11 +257,9 @@ export class Index {
     /**
      * A full readings panel for one station.
      * @param {Object} view - A station view: key, observation, metrics
-     * @param {Object} lapse - Lapse rate info shared by both stations
-     * @param {Object} stations - Per-station online flags
      * @returns {string} HTML markup
      */
-    renderStationView(view, lapse, stations) {
+    renderStationView(view) {
         const observation = view.observation;
         const uk = observation.uk_hybrid ?? {};
         const wind = readings.wind(observation);
@@ -275,16 +273,18 @@ export class Index {
                 <section class="panel">
                     <div class="rose-cell">
                         ${this.renderRose(wind, uk.windSpeed)}
-                        <div class="rose-readout">
-                            <span class="label"><span class="label-icon" aria-hidden="true">navigation</span>Wind from</span>
-                            <span class="cardinal">${wind.cardinal}</span>
-                            <span class="bearing">${wind.bearing}°</span>
-                        </div>
                     </div>
 
                     <div class="stat-cell">
-                        <span class="label"><span class="label-icon" aria-hidden="true">air</span>Wind speed</span>
-                        <p class="stat-value">${wind.speed}<span class="unit">km/h</span></p>
+                        <span class="label"><span class="label-icon" aria-hidden="true">air</span>Wind</span>
+
+                        <p class="stat-value">
+                            ${wind.cardinal}
+                            <span class="stat-bearing">${wind.bearing}°</span>
+                        </p>
+
+                        <p class="stat-value stat-value--speed">${wind.speed}<span class="unit">km/h</span></p>
+
                         <div class="gust-track">
                             <span class="gust-fill" style="width: ${gustPct}%"></span>
                             <span class="speed-fill" style="width: ${speedPct}%"></span>
@@ -292,8 +292,6 @@ export class Index {
                         <div class="gust-scale"><span>0</span><span>${WIND_SCALE}+ km/h</span></div>
                         <p class="stat-note">Gusting to <strong>${wind.gust} km/h</strong></p>
                     </div>
-
-                    ${this.renderLapseCell(lapse, stations)}
                 </section>
 
                 ${this.renderReadouts(observation, view.metrics)}
@@ -426,7 +424,11 @@ export class Index {
             weatherDataContainer.innerHTML =
                 notice +
                 this.renderTabs(views) +
-                enabled.map(view => this.renderStationView(view, data.lapseRateInfo, stations)).join('');
+                enabled.map(view => this.renderStationView(view)).join('');
+
+            // Belongs to the pair of stations, so it sits outside the tabs.
+            document.getElementById('lapse-summary').innerHTML =
+                this.renderLapseSummary(data.lapseRateInfo, stations);
 
             const lookup = Object.fromEntries(enabled.map(view => [view.key, view]));
             this.bindTabs(enabled, lookup);

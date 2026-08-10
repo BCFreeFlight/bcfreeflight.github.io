@@ -113,6 +113,55 @@ a { color: var(--blue); }
 
 .station-id .sep { color: var(--rule-strong); padding: 0 .5em; }
 
+/* Measures the pair of stations, so it sits with the site name rather than
+   inside either station's tab. */
+.lapse-dock {
+    flex: 0 1 340px;
+    align-self: flex-end;
+    padding: .7rem .9rem .8rem;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    background: var(--surface);
+}
+
+.lapse-head {
+    display: flex;
+    align-items: baseline;
+    gap: .75rem;
+    margin-top: .35rem;
+}
+
+.lapse-value {
+    flex: none;
+    margin: 0;
+    font-family: var(--font-data);
+    font-size: 1.75rem;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: -.01em;
+}
+
+.lapse-value .unit {
+    font-size: .4em;
+    font-weight: 400;
+    color: var(--ink-muted);
+    letter-spacing: .05em;
+    margin-left: .35em;
+}
+
+.lapse-value.is-empty { color: var(--ink-faint); }
+
+.lapse-note {
+    margin: 0;
+    font-size: .7rem;
+    line-height: 1.3;
+    color: var(--ink-muted);
+}
+
+.lapse-dock .lapse-scale { margin-top: .6rem; }
+
+.lapse-dock .lapse-ends { margin-top: .4rem; }
+
 .masthead-aside {
     display: flex;
     align-items: center;
@@ -226,57 +275,61 @@ a { color: var(--blue); }
 
 /* --- Primary panel: rose + wind + lapse ----------------------------------- */
 
+/* Direction and speed describe one thing, so they share one container rather
+   than sitting either side of a divider. */
 .panel {
     display: grid;
-    grid-template-columns: minmax(280px, 1.05fr) minmax(280px, 1fr);
-    gap: 1px;
+    grid-template-columns: minmax(240px, .9fr) minmax(240px, 1fr);
+    align-items: center;
     margin-top: var(--gutter);
-    background: var(--rule);
+    background: linear-gradient(115deg, var(--terrain) 0%, var(--surface) 55%);
     border: 1px solid var(--rule);
     border-radius: 6px;
     overflow: hidden;
     box-shadow: var(--shadow);
 }
 
-.panel > * { background: var(--surface); }
-
 .rose-cell {
-    grid-row: span 2;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 1rem;
     padding: clamp(1.25rem, 3vw, 2rem);
-    background: linear-gradient(180deg, var(--surface) 0%, var(--terrain) 100%);
 }
 
 .rose { width: min(100%, 320px); height: auto; display: block; }
 
-.rose-readout { text-align: center; }
-
-.rose-readout .cardinal {
-    font-family: var(--font-display);
-    font-size: clamp(2.25rem, 6vw, 3rem);
-    line-height: 1;
-    display: block;
+.stat-cell {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: clamp(1.25rem, 3vw, 1.75rem);
 }
-
-.rose-readout .bearing {
-    font-family: var(--font-data);
-    font-size: .875rem;
-    color: var(--ink-muted);
-    letter-spacing: .06em;
-}
-
-.stat-cell { padding: clamp(1.25rem, 3vw, 1.75rem); }
 
 .stat-value {
-    font-family: var(--font-data);
+    font-family: var(--font-display);
     font-size: clamp(2.5rem, 6vw, 3.25rem);
-    font-weight: 500;
+    font-weight: 400;
     line-height: 1;
-    margin: .6rem 0 0;
+    margin: .5rem 0 0;
+    letter-spacing: -.01em;
+}
+
+.stat-bearing {
+    font-family: var(--font-data);
+    font-size: .32em;
+    color: var(--ink-muted);
+    letter-spacing: .04em;
+    margin-left: .5em;
+    vertical-align: .35em;
+}
+
+/* Speed is a measurement, so it keeps the mono face the other readings use. */
+.stat-value--speed {
+    font-family: var(--font-data);
+    font-size: clamp(1.9rem, 4.5vw, 2.4rem);
+    font-weight: 500;
+    margin-top: .45rem;
     letter-spacing: -.02em;
 }
 
@@ -492,8 +545,8 @@ a { color: var(--blue); }
 
 @media (max-width: 720px) {
     .panel { grid-template-columns: 1fr; }
-    .rose-cell { grid-row: auto; }
     .masthead { align-items: flex-start; }
+    .lapse-dock { flex: 1 1 100%; }
     .masthead-aside { width: 100%; justify-content: space-between; padding-bottom: 0; }
     .timestamp { text-align: left; }
 }
