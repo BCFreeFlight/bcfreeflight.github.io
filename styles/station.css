@@ -772,3 +772,176 @@ a { color: var(--accent); }
 
     .chart-key { font-size: 10px; }
 }
+
+/* --- Windgram -------------------------------------------------------------
+   The day as a vertical slice through the hillside, in the shape the RASP
+   forecast draws it: time across, height up, and the colour of the air between
+   two stations standing for how willing it is to lift a glider.
+
+   The palette is deliberately not RASP's. Its lavender ground exists to make
+   white barbs readable over a model's worth of colour; we have three stations
+   and a white page, so the barbs are dark and the page stays the page. What is
+   kept is the notation — the strips, the barbs, the contours, the stability key
+   along the bottom — because that is the part a pilot already knows how to
+   read. */
+
+.chart-host[hidden],
+.windgram-host[hidden],
+.trend-picker[hidden] { display: none; }
+
+.windgram-host {
+    position: relative;
+    margin-top: .9rem;
+    touch-action: pan-y;
+}
+
+.windgram-svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+.windgram-bed { fill: #f8fafc; }
+
+.windgram-frame { fill: none; stroke: var(--rule-strong); stroke-width: 1; }
+
+.windgram-strip-bed { fill: var(--surface-soft); }
+
+.windgram-strip-fill { opacity: .85; }
+
+.windgram-strip-label { font-size: 11px; font-weight: 700; }
+
+.windgram-strip-unit { font-size: 9.5px; font-weight: 600; opacity: .75; }
+
+.windgram-strip-tick { font-size: 9.5px; font-weight: 600; }
+
+/* Ground is drawn, not left blank: a chart that simply stops at the lowest
+   station reads as missing data rather than as a hillside. */
+.windgram-terrain { fill: #6b7280; opacity: .55; }
+
+.windgram-station-rule {
+    stroke: rgba(17, 24, 39, .5);
+    stroke-width: 1;
+    stroke-dasharray: 4 3;
+}
+
+.windgram-station-name {
+    font-size: 10px;
+    font-weight: 700;
+    fill: rgba(17, 24, 39, .75);
+}
+
+/* Everything above this line is continued from the last measured gradient
+   rather than measured. */
+.windgram-extrapolated-edge {
+    stroke: rgba(17, 24, 39, .55);
+    stroke-width: 1.5;
+}
+
+.windgram-isotherm {
+    fill: none;
+    stroke: #1e3a8a;
+    stroke-width: 1;
+    opacity: .75;
+}
+
+.windgram-isotherm-label {
+    font-size: 9.5px;
+    font-weight: 700;
+    fill: #1e3a8a;
+    paint-order: stroke;
+    stroke: #f8fafc;
+    stroke-width: 3px;
+    stroke-linejoin: round;
+}
+
+.windgram-thermal-line {
+    fill: none;
+    stroke: #1d4ed8;
+    stroke-width: 2.2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+}
+
+.windgram-glider {
+    font-family: "Material Symbols Outlined", sans-serif;
+    font-variation-settings: "FILL" 1, "wght" 500, "GRAD" 0, "opsz" 20;
+    font-size: 16px;
+    fill: #1d4ed8;
+    paint-order: stroke;
+    stroke: #f8fafc;
+    stroke-width: 3px;
+    -webkit-font-smoothing: antialiased;
+}
+
+.windgram-cloudbase {
+    fill: none;
+    stroke: #ffffff;
+    stroke-width: 1.8;
+    stroke-dasharray: 2 5;
+    stroke-linecap: round;
+    opacity: .9;
+}
+
+/* Dark rather than the RASP's white, because our stability palette runs
+   through pale pinks a white barb would vanish into. */
+.windgram-barb {
+    fill: #111827;
+    stroke: #111827;
+    stroke-width: 1.3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.windgram-calm {
+    fill: none;
+    stroke: #111827;
+    stroke-width: 1.3;
+}
+
+.windgram-axis {
+    font-size: 10px;
+    font-weight: 500;
+    fill: var(--ink-faint);
+}
+
+.windgram-axis.is-station { font-weight: 700; fill: var(--ink-muted); }
+
+.windgram-hour-tick { stroke: var(--rule-strong); stroke-width: 1; }
+
+.windgram-legend-edge { font-size: 9px; font-weight: 600; fill: var(--ink-faint); }
+
+.windgram-legend-name {
+    font-size: 9.5px;
+    font-weight: 700;
+    fill: #16202b;
+    paint-order: stroke;
+    stroke: rgba(255, 255, 255, .7);
+    stroke-width: 2.5px;
+}
+
+.windgram-note { font-size: 9.5px; fill: var(--ink-faint); }
+
+.windgram-estimated { font-weight: 700; }
+
+.windgram-crosshair {
+    stroke: rgba(22, 32, 43, .75);
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+}
+
+.windgram-readout[hidden] { display: none; }
+
+.windgram-readout-line {
+    font-size: 10.5px;
+    font-weight: 700;
+    fill: #16202b;
+    paint-order: stroke;
+    stroke: rgba(255, 255, 255, .85);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+}
+
+@media (max-width: 640px) {
+    .windgram-axis,
+    .windgram-strip-tick,
+    .windgram-note { font-size: 9px; }
+
+    .windgram-legend-name { font-size: 8.5px; }
+}

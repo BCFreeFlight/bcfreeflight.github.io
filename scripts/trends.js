@@ -3,6 +3,8 @@ import {SERIES} from './config/series.js';
 import {STORAGE_KEYS} from './config/defaults.js';
 import {readJson, writeJson} from './lib/storage.js';
 import {Chart} from './chart.js';
+import {Windgram} from './windgram.js';
+import {buildWindgram} from './rasp.js';
 import {lapsePairs, lapseColumn} from './lapse-series.js';
 
 /**
@@ -65,11 +67,14 @@ export class Trends {
                                     aria-pressed="${this.mode === 'split'}">Stacked</button>
                             <button class="trend-mode" type="button" data-mode="combined"
                                     aria-pressed="${this.mode === 'combined'}">Overlay</button>
+                            <button class="trend-mode" type="button" data-mode="rasp"
+                                    aria-pressed="${this.mode === 'rasp'}">RASP</button>
                         </div>
                     </div>
                 </div>
 
                 <div class="chart-host"></div>
+                <div class="windgram-host" hidden></div>
                 <p class="trend-note">Reading today's log…</p>
             </section>`;
     }
@@ -88,6 +93,7 @@ export class Trends {
     mount(entries) {
         this.panels.forEach(panel => {
             panel.chart.destroy();
+            panel.windgram.destroy();
             // These are on the document, not the panel, so they outlive the
             // markup they were bound for unless they are taken off by hand.
             document.removeEventListener('pointerdown', panel.dismiss);
@@ -103,8 +109,13 @@ export class Trends {
             const panel = {
                 station: entry.station,
                 elevation: Number(entry.observation?.uk_hybrid?.elev),
+                // Carried through for the windgram, which needs to know where
+                // the sun is to tell sunlight from cloud.
+                latitude: Number(entry.observation?.lat),
+                longitude: Number(entry.observation?.lon),
                 host,
-                chart: new Chart(host.querySelector('.chart-host'))
+                chart: new Chart(host.querySelector('.chart-host')),
+                windgram: new Windgram(host.querySelector('.windgram-host'))
             };
 
             this.panels.set(entry.station.key, panel);
@@ -138,6 +149,17 @@ export class Trends {
             day: this.days.get(panel.station.key)
         })));
 
+        // Built once from every station, because a windgram is a slice through
+        // the whole hillside rather than a property of any one tab. Every
+        // panel is then handed the same drawing.
+        this.windgram = buildWindgram(panels.map(panel => ({
+            station: panel.station,
+            elevationFeet: panel.elevation,
+            latitude: panel.latitude,
+            longitude: panel.longitude,
+            day: this.days.get(panel.station.key)
+        })));
+
         this.panels.forEach(panel => this.apply(panel));
     }
 
@@ -165,7 +187,9 @@ export class Trends {
      * @returns {void}
      */
     reveal(key) {
-        this.panels.get(key)?.chart.scheduleDraw();
+        const panel = this.panels.get(key);
+        panel?.chart.scheduleDraw();
+        panel?.windgram.scheduleDraw();
     }
 
     /**
@@ -300,6 +324,19 @@ export class Trends {
         const day = this.dayFor(panel);
         const showing = this.showing();
 
+        // The windgram is not a selection of measurements, so its mode hides
+        // the picker rather than leaving a control that changes nothing.
+        const rasp = this.mode === 'rasp';
+
+        panel.host.querySelector('.chart-host').hidden = rasp;
+        panel.host.querySelector('.windgram-host').hidden = !rasp;
+        panel.host.querySelector('.trend-picker').hidden = rasp;
+
+        if (rasp) {
+            this.setMenu(panel, false);
+            panel.windgram.setModel(this.windgram);
+        }
+
         const available = this.catalogue().filter(series =>
             day?.values?.[series.key]?.some(value => value !== null));
 
@@ -356,6 +393,17 @@ export class Trends {
      */
     note(panel, day, available) {
         if (!day) return 'No readings logged for today yet.';
+
+        if (this.mode === 'rasp') {
+            if (!this.windgram) return 'Not enough logged today to draw the profile yet.';
+
+            return this.windgram.stations.length < 2
+                ? 'Only one station is reporting, so there is no profile to draw between them. '
+                    + 'The barbs and the strips are still today\'s readings.'
+                : 'The hillside as a column of air, in the shape RASP draws it. Colour is stability '
+                    + 'between the stations, barbs are the wind at each one, and the glider marks '
+                    + 'how high a thermal would get. Hover to read a moment.';
+        }
 
         const showing = available.filter(series => this.showing().includes(series.key));
 
