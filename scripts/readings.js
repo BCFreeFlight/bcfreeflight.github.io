@@ -12,6 +12,27 @@ import weather from './weather.js';
 // Shown wherever a station reports nothing for a field.
 export const NO_READING = '—';
 
+// Compass points written out. "SSW" is jargon; "south-southwest" is not, and
+// the page has to read for someone who has never seen a wind report.
+const COMPASS_WORDS = {
+    N: 'north',
+    NNE: 'north-northeast',
+    NE: 'northeast',
+    ENE: 'east-northeast',
+    E: 'east',
+    ESE: 'east-southeast',
+    SE: 'southeast',
+    SSE: 'south-southeast',
+    S: 'south',
+    SSW: 'south-southwest',
+    SW: 'southwest',
+    WSW: 'west-southwest',
+    W: 'west',
+    WNW: 'west-northwest',
+    NW: 'northwest',
+    NNW: 'north-northwest'
+};
+
 /**
  * Formats a measurement, or reports its absence.
  * @param {?number} value - The raw reading
@@ -46,10 +67,12 @@ export function wind(observation) {
 
     return {
         cardinal,
+        cardinalWords: known ? COMPASS_WORDS[cardinal] ?? cardinal : null,
         bearing: known ? Math.round(degrees) : null,
         rotation: known ? degrees + 180 : 0,
         speed,
         gust,
+        gusting: gust !== NO_READING && speed !== NO_READING && Number(gust) > Number(speed),
         summary: `${cardinal} ${speed} km/h`,
         gustSummary: `Wind (gust ${gust} km/h)`
     };
@@ -108,11 +131,13 @@ export function lapseSegments(loaded) {
         const lower = ranked[i + 1];
         const reading = lapse(weather.calculateLapseRate(upper.observation, lower.observation));
 
+        // Short names here: a segment names two stations at once, and the full
+        // pair would crowd both the tab bar and the video overlay.
         segments.push({
             ...reading,
-            from: upper.station.name,
-            to: lower.station.name,
-            span: `${upper.station.name} → ${lower.station.name}`
+            from: upper.station.shortName,
+            to: lower.station.shortName,
+            span: `${upper.station.shortName} → ${lower.station.shortName}`
         });
     }
 

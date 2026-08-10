@@ -4,6 +4,11 @@ body, html {
     height: 100%;
     overflow: hidden;
     background-color: black;
+    /* Same face as the weather page. Without this the overlay fell back to the
+       browser default, which is a serif. */
+    font-family: "Archivo", system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
 }
 
 /* Dynamic viewport height, so a collapsing mobile URL bar does not leave a

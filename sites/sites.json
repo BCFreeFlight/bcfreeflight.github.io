@@ -6,6 +6,7 @@
         {
           "default": true,
           "name": "Cooper's Launch",
+          "short_name": "Coopers",
           "wunderground": "ILUMBY7",
           "cacheSeconds": 60,
           "youtube": {
@@ -15,11 +16,13 @@
         },
         {
           "name": "Freedom Flight Park",
+          "short_name": "FFP",
           "wunderground": "ILUMBY8",
           "cacheSeconds": 1800
         },
         {
           "name": "Silver Star",
+          "short_name": "SilverStar",
           "wunderground": "IVERNO71",
           "cacheSeconds": 1800
         }
