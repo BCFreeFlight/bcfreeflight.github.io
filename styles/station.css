@@ -476,6 +476,7 @@ a { color: var(--accent); }
 
 .trend-controls {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: .5rem;
 }
@@ -765,8 +766,18 @@ a { color: var(--accent); }
     .trend-head { padding: 0 .4rem; }
 
     /* The picker and the layout buttons take a line each rather than being
-       squeezed onto one on a phone. */
+       squeezed onto one on a phone. They share a line where there is room for
+       it, and the layout buttons spread across whatever line they land on so a
+       wrap never leaves one of them hanging off the edge of the card. */
     .trend-controls { width: 100%; justify-content: space-between; }
+
+    .trend-picker { flex: 1 1 auto; min-width: 0; }
+
+    .trend-picker-toggle { width: 100%; justify-content: space-between; }
+
+    .trend-modes { flex: 1 1 auto; }
+
+    .trend-mode { flex: 1 1 0; padding: .3rem .5rem; text-align: center; }
 
     .trend-menu { max-width: min(20rem, 78vw); }
 
