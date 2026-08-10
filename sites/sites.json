@@ -5,7 +5,7 @@
       "stations": [
         {
           "default": true,
-          "name": "Launch",
+          "name": "Cooper's Launch",
           "wunderground": "ILUMBY7",
           "cacheSeconds": 60,
           "youtube": {
@@ -14,7 +14,7 @@
           }
         },
         {
-          "name": "Landing Zone",
+          "name": "Freedom Flight Park",
           "wunderground": "ILUMBY8",
           "cacheSeconds": 1800
         },
