@@ -202,55 +202,116 @@ export class Weather {
      * barometric pressure, and dew point. Returns null or undefined values for properties if no data is available.
      */
     async loadWeatherData(launchLocation, groundLocation = null, launchCacheTimeoutSeconds = 60, groundCacheTimeout = 60*30) {
-        let lapseRateInfo, observation, uvIndex, barometricPressure, dewPoint, humidity, heatIndex, windChill;
-        const launchWeather = await this.weatherUnderground.getWeather(launchLocation, launchCacheTimeoutSeconds); // 60-second cache
+        // The two stations are fetched and interpreted independently, so one
+        // going dark never takes the other down with it.
+        const [launchWeather, lzWeather] = await Promise.all([
+            this.safeGetWeather(launchLocation, launchCacheTimeoutSeconds), // 60-second cache
+            groundLocation
+                ? this.safeGetWeather(groundLocation, groundCacheTimeout)   // 30-minute cache
+                : Promise.resolve(null)
+        ]);
 
-        if (groundLocation) {
-            const lzWeather = await this.weatherUnderground.getWeather(groundLocation, groundCacheTimeout); // 30-minute cache
-            lapseRateInfo = this.calculateLapseRate(launchWeather, lzWeather);
-        }
+        const observation = this.firstObservation(launchWeather);
+        const groundObservation = this.firstObservation(lzWeather);
+        const lapseRateInfo = this.calculateLapseRate(launchWeather, lzWeather);
+        const metrics = this.describeObservation(observation);
 
-        if (launchWeather && launchWeather.observations && launchWeather.observations.length > 0) {
-            observation = launchWeather.observations[0];
-            uvIndex = this.uvIndexSummaries.find(s => observation.uv <= s.max);
-            let seaLevelPressure = this.computeSeaLevelPressure(observation.uk_hybrid.elev, observation.uk_hybrid.pressure);
-
-            barometricPressure = {
-                description: this.barometricPressureSummaries.find(s => seaLevelPressure <= s.max).description,
-                kPa: (observation.uk_hybrid.pressure / 10).toFixed(1),
-                hPa: observation.uk_hybrid.pressure? observation.uk_hybrid.pressure.toFixed(1):'n/a'
-            };
-
-            dewPoint = {
-                description: this.dewPointSummaries.find(s => observation.uk_hybrid.dewpt <= s.max).description,
-                celsius: observation.uk_hybrid.dewpt.toFixed(1)
-            };
-
-            humidity = {
-                description: this.humiditySummaries.find(s => observation.humidity <= s.max).description,
-                percent: observation.humidity.toFixed(0)
-            };
-
-            heatIndex = {
-                description: this.heatIndexSummaries.find(s => observation.uk_hybrid.heatIndex <= s.max).description,
-                celsius: observation.uk_hybrid.heatIndex.toFixed(1)
-            }
-
-            windChill = {
-                description: this.windChillSummaries.find(s => observation.uk_hybrid.windChill >= s.min).description,
-                celsius: observation.uk_hybrid.windChill.toFixed(1)
-            }
-        }
         return {
             observation,
+            groundObservation,
+            groundMetrics: this.describeObservation(groundObservation),
             lapseRateInfo,
-            uvIndex,
-            barometricPressure,
-            dewPoint,
-            humidity,
-            heatIndex,
-            windChill
+            stations: {
+                launch: {id: launchLocation, online: Boolean(observation)},
+                ground: {id: groundLocation, online: Boolean(groundObservation)}
+            },
+            ...metrics
         }
+    }
+
+    /**
+     * Fetches a station, resolving to null instead of rejecting so that one
+     * failing station cannot reject the whole page load
+     * @param {string} location - The station identifier
+     * @param {number} cacheTimeoutSeconds - Cache timeout for this station
+     * @returns {Promise<?Object>} The station data, or null
+     */
+    async safeGetWeather(location, cacheTimeoutSeconds) {
+        try {
+            return await this.weatherUnderground.getWeather(location, cacheTimeoutSeconds);
+        } catch (error) {
+            console.error(`Station ${location} failed to load:`, error);
+            return null;
+        }
+    }
+
+    /**
+     * Pulls the current observation out of an API response, if there is one
+     * @param {?Object} stationData - Raw Weather Underground response
+     * @returns {?Object} The observation, or undefined when the station is dark
+     */
+    firstObservation(stationData) {
+        return stationData?.observations?.[0];
+    }
+
+    /**
+     * Derives the interpreted metrics for a single observation. Each metric is
+     * independent: a missing reading yields nulls for that metric alone.
+     * @param {?Object} observation - A single station observation
+     * @returns {Object} uvIndex, barometricPressure, dewPoint, humidity, heatIndex, windChill
+     */
+    describeObservation(observation) {
+        const empty = {
+            uvIndex: null,
+            barometricPressure: null,
+            dewPoint: null,
+            humidity: null,
+            heatIndex: null,
+            windChill: null
+        };
+
+        if (!observation) {
+            return empty;
+        }
+
+        const uk = observation.uk_hybrid ?? {};
+        const has = value => value !== null && value !== undefined && !Number.isNaN(value);
+
+        const seaLevelPressure = has(uk.pressure)
+            ? this.computeSeaLevelPressure(uk.elev, uk.pressure)
+            : null;
+
+        return {
+            uvIndex: has(observation.uv)
+                ? this.uvIndexSummaries.find(s => observation.uv <= s.max)
+                : null,
+
+            barometricPressure: has(uk.pressure) ? {
+                description: this.barometricPressureSummaries.find(s => seaLevelPressure <= s.max).description,
+                kPa: (uk.pressure / 10).toFixed(1),
+                hPa: uk.pressure.toFixed(1)
+            } : null,
+
+            dewPoint: has(uk.dewpt) ? {
+                description: this.dewPointSummaries.find(s => uk.dewpt <= s.max).description,
+                celsius: uk.dewpt.toFixed(1)
+            } : null,
+
+            humidity: has(observation.humidity) ? {
+                description: this.humiditySummaries.find(s => observation.humidity <= s.max).description,
+                percent: observation.humidity.toFixed(0)
+            } : null,
+
+            heatIndex: has(uk.heatIndex) ? {
+                description: this.heatIndexSummaries.find(s => uk.heatIndex <= s.max).description,
+                celsius: uk.heatIndex.toFixed(1)
+            } : null,
+
+            windChill: has(uk.windChill) ? {
+                description: this.windChillSummaries.find(s => uk.windChill >= s.min).description,
+                celsius: uk.windChill.toFixed(1)
+            } : null
+        };
     }
 
     /**
@@ -271,12 +332,15 @@ export class Weather {
      * @returns {Object} Object containing lapse rate (°C/km) and elevation difference (m)
      */
     calculateLapseRate(primaryData, lapsData) {
-        if (!primaryData?.observations?.[0] || !lapsData?.observations?.[0]) {
-            return {lapseRate: null, elevDiff: null, summary: null};
+        const primaryObs = this.firstObservation(primaryData);
+        const lapsObs = this.firstObservation(lapsData);
+
+        // Needs both stations. Keep the shape stable so callers can render a
+        // placeholder without null-checking every nested field.
+        if (!primaryObs || !lapsObs) {
+            return {lapseRate: null, elevDiff: null, details: null};
         }
 
-        const primaryObs = primaryData.observations[0];
-        const lapsObs = lapsData.observations[0];
         const elevDiffFeet = lapsObs.uk_hybrid.elev - primaryObs.uk_hybrid.elev;
         const elevDiffThousandFeet = Math.abs(elevDiffFeet / 1000);
         const tempDiff = primaryObs.uk_hybrid.temp - lapsObs.uk_hybrid.temp;

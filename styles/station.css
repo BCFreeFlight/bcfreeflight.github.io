@@ -1,0 +1,506 @@
+/* ==========================================================================
+   Cooper's Launch — station panel
+   Light theme. Palette and linework borrowed from VFR sectional charts:
+   warm chart paper, slate ink, airspace magenta, class-B blue.
+   ========================================================================== */
+
+:root {
+    --paper: #fbfaf7;
+    --terrain: #f1ede4;
+    --surface: #ffffff;
+    --ink: #16202b;
+    --ink-muted: #66707c;
+    --ink-faint: #98a1ac;
+    --rule: #ddd8ce;
+    --rule-strong: #c3bcae;
+    --magenta: #b3247c;
+    --blue: #1f6fb2;
+
+    --shadow: 0 1px 2px rgba(22, 32, 43, .04), 0 8px 24px -16px rgba(22, 32, 43, .28);
+
+    --font-display: "Instrument Serif", Georgia, "Times New Roman", serif;
+    --font-ui: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --font-data: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+    --gutter: clamp(1rem, 4vw, 2.5rem);
+    --max: 1180px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: 16px;
+    line-height: 1.45;
+    font-variant-numeric: tabular-nums;
+    /* faint chart grid, 40px, sits behind everything */
+    background-image:
+        linear-gradient(to right, rgba(22, 32, 43, .035) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(22, 32, 43, .035) 1px, transparent 1px);
+    background-size: 40px 40px;
+}
+
+a { color: var(--blue); }
+
+:focus-visible {
+    outline: 2px solid var(--magenta);
+    outline-offset: 3px;
+    border-radius: 2px;
+}
+
+.shell {
+    max-width: var(--max);
+    margin: 0 auto;
+    padding: var(--gutter) var(--gutter) calc(var(--gutter) * 2);
+}
+
+/* --- Label: the one typographic device used everywhere -------------------- */
+
+.label {
+    font-family: var(--font-ui);
+    font-size: .6875rem;
+    font-weight: 600;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+}
+
+/* --- Masthead ------------------------------------------------------------- */
+
+.masthead {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--rule-strong);
+}
+
+.wordmark {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.5rem, 7vw, 4rem);
+    line-height: .95;
+    letter-spacing: -.01em;
+    margin: 0;
+}
+
+.station-id {
+    display: block;
+    margin-top: .5rem;
+    color: var(--ink-muted);
+    font-size: .8125rem;
+    letter-spacing: .04em;
+}
+
+.station-id .sep { color: var(--rule-strong); padding: 0 .5em; }
+
+.masthead-aside {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    padding-bottom: .35rem;
+}
+
+.timestamp {
+    text-align: right;
+    font-family: var(--font-data);
+    font-size: .8125rem;
+    color: var(--ink-muted);
+}
+
+.timestamp .label { display: block; margin-bottom: .15rem; }
+
+.live-link {
+    display: inline-flex;
+    align-items: center;
+    gap: .45rem;
+    padding: .5rem .9rem;
+    border: 1px solid var(--rule-strong);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    font-size: .8125rem;
+    font-weight: 600;
+    letter-spacing: .02em;
+    white-space: nowrap;
+    transition: border-color .18s, color .18s, transform .18s;
+}
+
+.live-link:hover { border-color: var(--magenta); color: var(--magenta); transform: translateY(-1px); }
+
+.live-dot {
+    width: .5rem;
+    height: .5rem;
+    border-radius: 50%;
+    background: var(--magenta);
+    animation: pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* --- Station switcher ----------------------------------------------------- */
+
+.tabs {
+    display: flex;
+    gap: .25rem;
+    margin-top: var(--gutter);
+    border-bottom: 1px solid var(--rule);
+}
+
+.tab {
+    appearance: none;
+    background: none;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    padding: .6rem .9rem .7rem;
+    font: inherit;
+    text-align: left;
+    color: var(--ink-muted);
+    cursor: pointer;
+    transition: color .18s, border-color .18s;
+}
+
+.tab-name {
+    display: block;
+    font-size: .9375rem;
+    font-weight: 600;
+    letter-spacing: -.005em;
+}
+
+.tab-meta {
+    display: block;
+    margin-top: .1rem;
+    font-family: var(--font-data);
+    font-size: .6875rem;
+    color: var(--ink-faint);
+}
+
+.tab:hover:not([disabled]) { color: var(--ink); }
+
+.tab[aria-selected="true"] {
+    color: var(--ink);
+    border-bottom-color: var(--magenta);
+}
+
+.tab[disabled] { opacity: .45; cursor: default; }
+
+.tabs + .view .panel { margin-top: 1.25rem; }
+
+.view:focus { outline: none; }
+
+/* --- Degraded-data notice ------------------------------------------------- */
+
+.notice {
+    margin: var(--gutter) 0 0;
+    padding: .75rem 1rem;
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--magenta);
+    border-radius: 4px;
+    background: var(--surface);
+    font-size: .8125rem;
+    color: var(--ink-muted);
+}
+
+.notice + .panel { margin-top: 1rem; }
+
+/* --- Primary panel: rose + wind + lapse ----------------------------------- */
+
+.panel {
+    display: grid;
+    grid-template-columns: minmax(280px, 1.05fr) minmax(280px, 1fr);
+    gap: 1px;
+    margin-top: var(--gutter);
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+}
+
+.panel > * { background: var(--surface); }
+
+.rose-cell {
+    grid-row: span 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    padding: clamp(1.25rem, 3vw, 2rem);
+    background: linear-gradient(180deg, var(--surface) 0%, var(--terrain) 100%);
+}
+
+.rose {
+    position: relative;
+    width: min(100%, 320px);
+    display: grid;
+    place-items: center;
+}
+
+.rose-dial { grid-area: 1 / 1; width: 100%; height: auto; display: block; }
+
+/* Filled variant of the Material Symbols glyph, centred on the dial hub. */
+.weather-icon {
+    font-family: "Material Symbols Outlined", sans-serif;
+    font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24;
+    font-size: 5rem;
+    line-height: 1;
+    color: var(--magenta);
+    -webkit-font-smoothing: antialiased;
+}
+
+.rose .needle { grid-area: 1 / 1; }
+
+.rose-readout { text-align: center; }
+
+.rose-readout .cardinal {
+    font-family: var(--font-display);
+    font-size: clamp(2.25rem, 6vw, 3rem);
+    line-height: 1;
+    display: block;
+}
+
+.rose-readout .bearing {
+    font-family: var(--font-data);
+    font-size: .875rem;
+    color: var(--ink-muted);
+    letter-spacing: .06em;
+}
+
+.stat-cell { padding: clamp(1.25rem, 3vw, 1.75rem); }
+
+.stat-value {
+    font-family: var(--font-data);
+    font-size: clamp(2.5rem, 6vw, 3.25rem);
+    font-weight: 500;
+    line-height: 1;
+    margin: .6rem 0 0;
+    letter-spacing: -.02em;
+}
+
+.stat-value .unit {
+    font-size: .34em;
+    font-weight: 400;
+    color: var(--ink-muted);
+    letter-spacing: .06em;
+    margin-left: .35em;
+}
+
+.stat-note {
+    margin: .5rem 0 0;
+    font-size: .8125rem;
+    color: var(--ink-muted);
+}
+
+/* wind speed vs gust bar */
+.gust-track {
+    position: relative;
+    height: 6px;
+    margin-top: 1.1rem;
+    background: var(--terrain);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.gust-fill, .speed-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: 999px;
+    transition: width .9s cubic-bezier(.22, .61, .36, 1);
+}
+
+.gust-fill { background: var(--blue); opacity: .3; }
+.speed-fill { background: var(--magenta); }
+
+.gust-scale {
+    display: flex;
+    justify-content: space-between;
+    margin-top: .4rem;
+    font-family: var(--font-data);
+    font-size: .6875rem;
+    color: var(--ink-faint);
+}
+
+/* lapse rate scale */
+.lapse-scale {
+    position: relative;
+    height: 12px;
+    margin-top: 1.1rem;
+    border-radius: 3px;
+    overflow: hidden;
+    display: flex;
+}
+
+.lapse-band { flex: 1 1 auto; }
+
+.lapse-scale.is-idle { opacity: .35; filter: saturate(.4); }
+
+.stat-value.is-empty, .readout-value.is-empty { color: var(--ink-faint); }
+
+.lapse-marker {
+    position: absolute;
+    top: -5px;
+    bottom: -5px;
+    width: 2px;
+    background: var(--ink);
+    transform: translateX(-1px);
+    transition: left .9s cubic-bezier(.22, .61, .36, 1);
+}
+
+.lapse-marker::after {
+    content: "";
+    position: absolute;
+    top: -4px;
+    left: 50%;
+    width: 7px;
+    height: 7px;
+    background: var(--ink);
+    transform: translateX(-50%) rotate(45deg);
+}
+
+.lapse-ends {
+    display: flex;
+    justify-content: space-between;
+    margin-top: .55rem;
+    font-family: var(--font-data);
+    font-size: .6875rem;
+    color: var(--ink-faint);
+}
+
+.lapse-name {
+    font-weight: 600;
+    color: var(--ink);
+}
+
+/* --- Readout grid --------------------------------------------------------- */
+
+.readouts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1px;
+    margin-top: 1.5rem;
+    /* Surface, not rule: a partly-filled last row stays paper, not a grey slab.
+       The hairlines come from each cell's outline instead. */
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.readout {
+    background: var(--surface);
+    box-shadow: 0 0 0 1px var(--rule);
+    padding: 1.15rem 1.25rem 1.25rem;
+    min-height: 132px;
+    display: flex;
+    flex-direction: column;
+}
+
+.readout .label { display: block; }
+
+.readout-value {
+    font-family: var(--font-data);
+    font-size: 1.75rem;
+    font-weight: 500;
+    line-height: 1.1;
+    margin: .55rem 0 0;
+    letter-spacing: -.01em;
+}
+
+.readout-value .unit {
+    font-size: .5em;
+    font-weight: 400;
+    color: var(--ink-muted);
+    letter-spacing: .05em;
+    margin-left: .3em;
+}
+
+.readout-note {
+    margin: auto 0 0;
+    padding-top: .6rem;
+    font-size: .75rem;
+    line-height: 1.35;
+    color: var(--ink-muted);
+}
+
+/* --- States --------------------------------------------------------------- */
+
+.state {
+    margin-top: var(--gutter);
+    padding: 3rem 1.5rem;
+    text-align: center;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--ink-muted);
+}
+
+.state-title {
+    font-family: var(--font-display);
+    font-size: 1.75rem;
+    color: var(--ink);
+    margin: 0 0 .35rem;
+}
+
+.state p { margin: 0; }
+
+.sweep {
+    width: 28px;
+    height: 28px;
+    margin: 0 auto 1rem;
+    border: 2px solid var(--rule);
+    border-top-color: var(--magenta);
+    border-radius: 50%;
+    animation: spin 900ms linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.visually-hidden {
+    position: absolute;
+    width: 1px; height: 1px;
+    margin: -1px; padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+/* --- Entrance ------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+    .panel, .readout {
+        animation: rise .5s cubic-bezier(.22, .61, .36, 1) backwards;
+    }
+    .readout:nth-child(n+1) { animation-delay: calc(60ms + var(--i, 0) * 35ms); }
+    @keyframes rise {
+        from { opacity: 0; transform: translateY(10px); }
+    }
+    .needle { transition: transform 1.1s cubic-bezier(.22, .61, .36, 1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+    }
+}
+
+/* --- Narrow --------------------------------------------------------------- */
+
+@media (max-width: 720px) {
+    .panel { grid-template-columns: 1fr; }
+    .rose-cell { grid-row: auto; }
+    .masthead { align-items: flex-start; }
+    .masthead-aside { width: 100%; justify-content: space-between; padding-bottom: 0; }
+    .timestamp { text-align: left; }
+}
