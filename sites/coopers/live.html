@@ -8,43 +8,60 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols:opsz,wght,FILL,GRAD@24,400,0,0"/>
     <link rel="stylesheet" href="../../styles/live.css">
 </head>
-<body>
+<body data-view="fill" data-weather="shown">
 <div id="video-container">
     <div class="video-mask">
-        <iframe style="border: none;"
-                id="video-player"
+        <iframe id="video-player"
+                title="Cooper's Launch live stream"
                 src="https://www.youtube.com/embed/live_stream?channel=UCQt2u6plzHb6gyfrnCprwGA&autoplay=1&mute=1&controls=0&rel=0&showinfo=0&loop=1&modestbranding=1&iv_load_policy=3&disablekb=1"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowfullscreen
-                width="100%"
-                height="100%">
+                allowfullscreen>
         </iframe>
     </div>
 </div>
 
-<div id="weather-overlay">
-    <div class="weather-item" id="wind">
-        <i class="material-symbols weather-icon">navigation</i>
-        <div class="weather-value">Loading...</div>
-        <div class="weather-title">Wind</div>
+<div id="weather-dock">
+    <div class="dock-bar">
+        <span class="dock-side"></span>
+
+        <button class="weather-handle" type="button" id="toggle-weather" aria-pressed="true"
+                aria-controls="weather-overlay">
+            <i class="material-symbols" aria-hidden="true">expand_more</i>
+            <span class="visually-hidden">Hide the weather readings</span>
+        </button>
+
+        <span class="dock-side dock-side--end">
+            <button class="control" type="button" id="toggle-view" aria-pressed="false">
+                <i class="material-symbols" aria-hidden="true">fit_screen</i>
+                <span class="visually-hidden">Show the whole frame</span>
+            </button>
+        </span>
     </div>
 
-    <div class="weather-item" id="temperature">
-        <i class="material-symbols weather-icon">device_thermostat</i>
-        <div class="weather-value">Loading...</div>
-        <div class="weather-title">Temperature at Launch</div>
-    </div>
+    <div id="weather-overlay">
+        <div class="weather-item" id="wind">
+            <i class="material-symbols weather-icon">navigation</i>
+            <div class="weather-value">Loading...</div>
+            <div class="weather-title">Wind</div>
+        </div>
 
-    <div class="weather-item" id="rainfall">
-        <i class="material-symbols weather-icon">water_drop</i>
-        <div class="weather-value">Loading...</div>
-        <div class="weather-title">Rainfall</div>
-    </div>
+        <div class="weather-item" id="temperature">
+            <i class="material-symbols weather-icon">device_thermostat</i>
+            <div class="weather-value">Loading...</div>
+            <div class="weather-title">Temperature at Launch</div>
+        </div>
 
-    <div class="weather-item" id="lapse-rate">
-        <i class="material-symbols weather-icon">elevation</i>
-        <div class="weather-value">Loading...</div>
-        <div class="weather-title">Lapse Rate</div>
+        <div class="weather-item" id="rainfall">
+            <i class="material-symbols weather-icon">water_drop</i>
+            <div class="weather-value">Loading...</div>
+            <div class="weather-title">Rainfall</div>
+        </div>
+
+        <div class="weather-item" id="lapse-rate">
+            <i class="material-symbols weather-icon">elevation</i>
+            <div class="weather-value">Loading...</div>
+            <div class="weather-title">Lapse Rate</div>
+        </div>
     </div>
 </div>
 
