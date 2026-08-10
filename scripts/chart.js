@@ -316,23 +316,26 @@ export class Chart {
     scaleFor(series) {
         // A measurement with a natural range — a compass — keeps it, so a
         // steady wind reads as steady rather than filling the panel.
+        // A bank counts as inverted only when every series in it is.
+        const invert = series.every(item => item.invert === true);
+
         const fixed = series.find(item => item.domain);
         if (fixed) {
             const [lo, hi] = fixed.domain;
-            return {lo, hi, ticks: [0, 90, 180, 270, 360].filter(tick => tick >= lo && tick <= hi)};
+            return {lo, hi, invert, ticks: [0, 90, 180, 270, 360].filter(tick => tick >= lo && tick <= hi)};
         }
 
         const values = series
             .flatMap(item => this.day.values[item.key] ?? [])
             .filter(value => value !== null);
 
-        if (!values.length) return {lo: 0, hi: 1, ticks: [0, 1]};
+        if (!values.length) return {lo: 0, hi: 1, invert, ticks: [0, 1]};
 
         // A bank shares a floor only when every series in it has one.
         const floors = series.map(item => item.floor);
         const floor = floors.every(value => Number.isFinite(value)) ? Math.max(...floors) : null;
 
-        return niceScale(Math.min(...values), Math.max(...values), 4, floor);
+        return {...niceScale(Math.min(...values), Math.max(...values), 4, floor), invert};
     }
 
     /**
@@ -360,8 +363,7 @@ export class Chart {
             ? this.scaleFor([series])
             : plot.axes.find(axis => axis.unit === series.unit) ?? plot.axes[0];
 
-        const fraction = (value - scale.lo) / (scale.hi - scale.lo);
-        return plot.bottom - fraction * (plot.bottom - plot.top);
+        return this.atValue(value, scale, plot);
     }
 
     /**
@@ -372,7 +374,14 @@ export class Chart {
      * @returns {number} A y coordinate
      */
     atValue(value, axis, plot) {
-        return plot.bottom - ((value - axis.lo) / (axis.hi - axis.lo)) * (plot.bottom - plot.top);
+        const fraction = (value - axis.lo) / (axis.hi - axis.lo);
+
+        // An inverted axis counts down from the top. Lapse rate is the one that
+        // wants it: the more negative the number, the more the air climbs, so
+        // the reading a pilot is looking for belongs at the top of the panel.
+        return axis.invert
+            ? plot.top + fraction * (plot.bottom - plot.top)
+            : plot.bottom - fraction * (plot.bottom - plot.top);
     }
 
     /**
@@ -401,14 +410,14 @@ export class Chart {
         // needs horizontal rules to read heights against.
         const gridlines = (primary?.ticks ?? [0, 0.25, 0.5, 0.75, 1]).map(tick => {
             const y = primary
-                ? plot.bottom - ((tick - primary.lo) / (primary.hi - primary.lo)) * (plot.bottom - plot.top)
+                ? this.atValue(tick, primary, plot)
                 : plot.bottom - tick * (plot.bottom - plot.top);
 
             return `<line class="chart-grid" x1="${plot.left}" y1="${y.toFixed(1)}" x2="${plot.right}" y2="${y.toFixed(1)}"></line>`;
         }).join('');
 
         const axisLabels = plot.axes.map(axis => axis.ticks.map(tick => {
-            const y = plot.bottom - ((tick - axis.lo) / (axis.hi - axis.lo)) * (plot.bottom - plot.top);
+            const y = this.atValue(tick, axis, plot);
             const onLeft = axis.side === 'left';
 
             return `<text class="chart-axis" x="${onLeft ? plot.left - 8 : plot.right + 8}" y="${(y + 4).toFixed(1)}"
