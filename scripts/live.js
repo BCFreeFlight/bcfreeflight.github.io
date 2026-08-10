@@ -126,7 +126,7 @@ export class Live {
 
             // The button offers the mode you are not in.
             viewButton.setAttribute('aria-pressed', String(!filling));
-            viewButton.querySelector('.material-symbols').textContent =
+            viewButton.querySelector('.material-symbols-outlined').textContent =
                 filling ? 'fit_screen' : 'zoom_out_map';
             viewButton.querySelector('.visually-hidden').textContent =
                 filling ? 'Show the whole frame' : 'Fill the screen';
@@ -142,7 +142,7 @@ export class Live {
             document.body.dataset.weather = visible ? 'shown' : 'hidden';
             weatherButton.setAttribute('aria-pressed', String(visible));
             // The chevron points the way the readings will travel.
-            weatherButton.querySelector('.material-symbols').textContent =
+            weatherButton.querySelector('.material-symbols-outlined').textContent =
                 visible ? 'expand_more' : 'expand_less';
             weatherButton.querySelector('.visually-hidden').textContent =
                 visible ? 'Hide the weather readings' : 'Show the weather readings';
@@ -346,7 +346,7 @@ export class Live {
 
         overlay.insertAdjacentHTML('beforeend', `
             <div class="weather-item weather-item--lapse">
-                <i class="material-symbols weather-icon">elevation</i>
+                <i class="material-symbols-outlined weather-icon">elevation</i>
                 ${body}
                 <div class="weather-title">Lapse Rate &middot; ºC/1000 ft</div>
             </div>`);

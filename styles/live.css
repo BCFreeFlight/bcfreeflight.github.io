@@ -99,7 +99,7 @@ body[data-pannable="true"] .video-mask.is-dragging { cursor: grabbing; }
 
 .control:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 
-.control .material-symbols { font-size: 22px; line-height: 1; }
+.control .material-symbols-outlined { font-size: 22px; line-height: 1; }
 
 /* --- Weather overlay ------------------------------------------------------ */
 
@@ -174,7 +174,7 @@ body[data-weather="hidden"] #weather-dock {
 
 .weather-handle:focus-visible { outline: 2px solid #fff; outline-offset: -3px; }
 
-.weather-handle .material-symbols { font-size: 22px; line-height: 1; }
+.weather-handle .material-symbols-outlined { font-size: 22px; line-height: 1; }
 
 #weather-overlay {
     background-color: rgba(0, 0, 0, 0.50);
@@ -291,7 +291,7 @@ body[data-weather="hidden"] #weather-dock {
 
     #weather-dock { --control-size: 38px; }
 
-    .control .material-symbols { font-size: 19px; }
+    .control .material-symbols-outlined { font-size: 19px; }
 }
 
 /* Very narrow phones: drop the leg names rather than let the strip overflow.
@@ -340,7 +340,7 @@ body[data-weather="hidden"] #weather-dock {
         right: env(safe-area-inset-right);
     }
 
-    .weather-handle .material-symbols { font-size: 18px; }
+    .weather-handle .material-symbols-outlined { font-size: 18px; }
 
     #weather-overlay {
         padding: 6px 10px calc(6px + var(--edge-bottom));
@@ -377,7 +377,7 @@ body[data-weather="hidden"] #weather-dock {
     .lapse-rate { font-size: .85rem; }
     .lapse-leg { font-size: .58rem; }
 
-    .control .material-symbols { font-size: 18px; }
+    .control .material-symbols-outlined { font-size: 18px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
