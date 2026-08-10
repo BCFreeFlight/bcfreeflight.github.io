@@ -76,6 +76,9 @@ export class Sites {
             // Stable enough to use in element ids and to key state by.
             key: station.wunderground.toLowerCase(),
             name: station.name ?? station.wunderground,
+            // For places where the full name would crowd the line, such as a
+            // lapse segment naming two stations at once.
+            shortName: station.short_name ?? station.name ?? station.wunderground,
             id: station.wunderground,
             isDefault,
             order: index,

@@ -131,11 +131,13 @@ export function lapseSegments(loaded) {
         const lower = ranked[i + 1];
         const reading = lapse(weather.calculateLapseRate(upper.observation, lower.observation));
 
+        // Short names here: a segment names two stations at once, and the full
+        // pair would crowd both the tab bar and the video overlay.
         segments.push({
             ...reading,
-            from: upper.station.name,
-            to: lower.station.name,
-            span: `${upper.station.name} → ${lower.station.name}`
+            from: upper.station.shortName,
+            to: lower.station.shortName,
+            span: `${upper.station.shortName} → ${lower.station.shortName}`
         });
     }
 
