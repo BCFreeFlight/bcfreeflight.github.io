@@ -4,6 +4,7 @@ import {READOUTS} from '../scripts/config/readouts.js';
 import {History} from '../scripts/history.js';
 import {Chart} from '../scripts/chart.js';
 import {lapsePairs, lapseColumn} from '../scripts/lapse-series.js';
+import {pointAt} from '../scripts/config/compass.js';
 import weather from '../scripts/weather.js';
 
 /**
@@ -274,6 +275,95 @@ describe('the wind arrows', () => {
         delete noDirection.values.windDir;
 
         ok(!draw({day: noDirection, keys: ['humidity']}).includes('chart-arrows'));
+    });
+});
+
+describe('reading a moment off the chart', () => {
+    /**
+     * Puts the crosshair on one reading and hands back what it printed.
+     * @param {string[]} keys - The measurements to show
+     * @param {number} [index=4] - Which reading to land on
+     * @returns {string[]} The readout labels
+     */
+    function readout(keys, index = 4) {
+        const host = document.createElement('div');
+        host.style.cssText = 'width:900px;position:absolute;left:-9999px;top:0';
+        document.body.appendChild(host);
+
+        const chart = new Chart(host);
+        chart.setCatalogue(SERIES);
+        chart.setDay(days.ILUMBY7);
+        chart.setView(keys, 'split');
+        chart.showReadout(index);
+
+        const values = [...host.querySelectorAll('.chart-readout-value')].map(node => node.textContent);
+        chart.destroy();
+        host.remove();
+
+        return values;
+    }
+
+    it('names the wind direction rather than giving a bearing', () => {
+        // "224.0 º" has to be converted in the reader's head; "WSW" does not.
+        const [text] = readout(['windDir']);
+        equal(text, pointAt(days.ILUMBY7.values.windDir[4]).abbr);
+        ok(/^[NSEW]{1,3}$/.test(text), `${text} is a compass point`);
+    });
+
+    it('does not print the degree sign on a direction any more', () => {
+        ok(!readout(['windDir'])[0].includes('º'));
+    });
+
+    it('agrees with the compass down the side of the panel', () => {
+        // A reading of 270 sits on the W gridline, so it must read W.
+        const straightWest = {
+            ...days.ILUMBY7,
+            values: {...days.ILUMBY7.values, windDir: days.ILUMBY7.values.windDir.map(() => 270)}
+        };
+
+        const host = document.createElement('div');
+        host.style.cssText = 'width:900px;position:absolute;left:-9999px;top:0';
+        document.body.appendChild(host);
+
+        const chart = new Chart(host);
+        chart.setCatalogue(SERIES);
+        chart.setDay(straightWest);
+        chart.setView(['windDir'], 'split');
+        chart.showReadout(4);
+
+        equal(host.querySelector('.chart-readout-value').textContent, 'W');
+        chart.destroy();
+        host.remove();
+    });
+
+    it('leaves every other measurement as a number and a unit', () => {
+        const [temperature] = readout(['temp']);
+        ok(/^[\d.-]+ ºC$/.test(temperature), `${temperature} is still a temperature`);
+
+        const [rain] = readout(['precipTotal']);
+        ok(/^[\d.]+ mm$/.test(rain), `${rain} is still a depth`);
+    });
+
+    it('keeps each measurement in its own words when several are shown', () => {
+        const texts = readout(['windSpeed', 'windDir']);
+        ok(texts.some(text => text.includes('km/h')), 'speed carries its unit');
+        ok(texts.some(text => /^[NSEW]{1,3}$/.test(text)), 'direction does not');
+    });
+
+    it('prints the time it is reading', () => {
+        const host = document.createElement('div');
+        host.style.cssText = 'width:900px;position:absolute;left:-9999px;top:0';
+        document.body.appendChild(host);
+
+        const chart = new Chart(host);
+        chart.setCatalogue(SERIES);
+        chart.setDay(days.ILUMBY7);
+        chart.setView(['windDir'], 'split');
+        chart.showReadout(4);
+
+        ok(/\d/.test(host.querySelector('.chart-readout-time').textContent));
+        chart.destroy();
+        host.remove();
     });
 });
 
