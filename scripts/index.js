@@ -2,6 +2,7 @@ import time from './time.js';
 import weather from './weather.js';
 import sites from './sites.js';
 import youtube from './youtube.js';
+import trends from './trends.js';
 import * as readings from './readings.js';
 
 // Speed at which the windsock reads fully extended, in km/h.
@@ -233,6 +234,7 @@ export class Index {
                 </section>
 
                 ${this.renderReadouts(observation, entry.metrics)}
+                ${trends.render(entry.station)}
             </div>`;
     }
 
@@ -281,6 +283,10 @@ export class Index {
         document.querySelectorAll('.view').forEach(panel => {
             panel.hidden = panel.dataset.view !== key;
         });
+
+        // A chart cannot size itself inside a hidden panel, so it is told the
+        // moment its panel is on screen.
+        trends.reveal(key);
     }
 
     /**
@@ -494,6 +500,10 @@ export class Index {
                 enabled.map(entry => this.renderStationView(entry)).join('');
 
             this.renderMasthead(loaded);
+
+            // Before the tabs, so the panel revealed by activateView already
+            // has a chart to size.
+            trends.mount(enabled);
 
             const lookup = Object.fromEntries(enabled.map(entry => [entry.station.key, entry]));
             this.bindTabs(enabled, lookup, selected);

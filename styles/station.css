@@ -417,6 +417,182 @@ a { color: var(--accent); }
     color: var(--ink-muted);
 }
 
+/* --- Today's trend --------------------------------------------------------
+   The day behind the readings above. Chips choose what is drawn; the layout
+   buttons choose whether each measurement gets its own panel or they are all
+   laid over one another. */
+
+.trend {
+    margin-top: .75rem;
+    padding: 1rem 1.1rem 1.1rem;
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    background: var(--surface);
+}
+
+.trend-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: .6rem 1rem;
+}
+
+/* A pair of buttons that read as one control, so the choice between them is
+   obvious without a label explaining it. */
+.trend-modes {
+    display: flex;
+    border: 2px solid var(--rule-strong);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.trend-mode {
+    appearance: none;
+    padding: .3rem .85rem;
+    border: none;
+    background: var(--surface);
+    font: inherit;
+    font-size: .8125rem;
+    font-weight: 700;
+    color: var(--ink-muted);
+    cursor: pointer;
+    transition: background-color .15s, color .15s;
+}
+
+.trend-mode:hover:not([aria-pressed="true"]) { background: var(--accent-soft); color: var(--accent); }
+
+.trend-mode[aria-pressed="true"] { background: var(--accent); color: #fff; cursor: default; }
+
+.trend-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+    margin-top: .8rem;
+}
+
+/* Each chip carries its line's own colour, so the key and the control are the
+   same object rather than two things to match up. */
+.trend-chip {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    padding: .32rem .7rem;
+    border: 2px solid var(--rule);
+    border-radius: 999px;
+    background: var(--surface);
+    font: inherit;
+    font-size: .8125rem;
+    font-weight: 600;
+    color: var(--ink-muted);
+    cursor: pointer;
+    transition: border-color .15s, background-color .15s, color .15s;
+}
+
+.trend-swatch {
+    width: .6rem;
+    height: .6rem;
+    border-radius: 3px;
+    background: var(--series, var(--rule-strong));
+    opacity: .35;
+    transition: opacity .15s;
+}
+
+.trend-chip:hover { border-color: var(--rule-strong); color: var(--ink); }
+
+.trend-chip[aria-pressed="true"] {
+    border-color: var(--series, var(--accent));
+    color: var(--ink);
+}
+
+.trend-chip[aria-pressed="true"] .trend-swatch { opacity: 1; }
+
+/* Set apart from the measurement chips: these two act on all of them rather
+   than standing for a line of their own. */
+.trend-bulk {
+    appearance: none;
+    padding: .32rem .7rem;
+    border: 2px dashed var(--rule-strong);
+    border-radius: 999px;
+    background: var(--surface);
+    font: inherit;
+    font-size: .8125rem;
+    font-weight: 700;
+    color: var(--ink-muted);
+    cursor: pointer;
+    transition: border-color .15s, color .15s;
+}
+
+.trend-bulk:hover { border-color: var(--accent); color: var(--accent); }
+
+.chart-host {
+    position: relative;
+    margin-top: .9rem;
+    /* The crosshair is read by pointer, and on a phone that means a finger:
+       let it track without the page scrolling out from under it. */
+    touch-action: pan-y;
+}
+
+.chart-svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+.chart-line { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+
+.chart-band { fill: rgba(22, 32, 43, .04); }
+
+.chart-grid { stroke: var(--rule); stroke-width: 1; }
+
+.chart-zero { stroke: var(--rule-strong); stroke-width: 1.4; }
+
+.chart-baseline { stroke: var(--rule-strong); stroke-width: 1; }
+
+.chart-axis {
+    font-size: 10.5px;
+    font-weight: 500;
+    fill: var(--ink-faint);
+}
+
+.chart-unit {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .02em;
+    fill: var(--ink-faint);
+}
+
+.chart-key { font-size: 11px; font-weight: 600; fill: var(--ink-muted); }
+
+.chart-key-swatch { rx: 2; }
+
+.chart-crosshair { stroke: var(--ink); stroke-width: 1; opacity: .55; }
+
+.chart-readout-time { font-size: 11px; font-weight: 700; fill: var(--ink); }
+
+/* A halo, so a value stays legible where it lands on top of its own line. */
+.chart-readout-value {
+    font-size: 11.5px;
+    font-weight: 700;
+    paint-order: stroke;
+    stroke: var(--surface);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+}
+
+.chart-readout-dot { stroke: var(--surface); stroke-width: 1.5; }
+
+.chart-empty {
+    margin: 0;
+    padding: 2rem 0;
+    text-align: center;
+    color: var(--ink-faint);
+}
+
+.trend-note {
+    margin: .7rem 0 0;
+    font-size: .8125rem;
+    line-height: 1.4;
+    color: var(--ink-muted);
+}
+
 /* --- States --------------------------------------------------------------- */
 
 .state {
@@ -491,6 +667,21 @@ a { color: var(--accent); }
         gap: 1rem;
         padding: 1.1rem;
     }
+
+    /* The chart needs the width more than the card needs its margins. */
+    .trend { padding: .9rem .6rem 1rem; }
+
+    .trend-head { padding: 0 .4rem; }
+
+    .trend-chips { padding: 0 .4rem; }
+
+    .trend-chip, .trend-bulk { padding: .3rem .55rem; font-size: .75rem; }
+
+    .trend-note { padding: 0 .4rem; font-size: .78125rem; }
+
+    .chart-axis, .chart-unit { font-size: 9.5px; }
+
+    .chart-key { font-size: 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
