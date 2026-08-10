@@ -1,5 +1,6 @@
 import time from './time.js';
 import weather from './weather.js';
+import * as readings from './readings.js';
 
 // Bounds of the lapse-rate scale, in °C per 1000 ft.
 const LAPSE_MIN = -4;
@@ -14,8 +15,7 @@ const WINDSOCK_FULL = 20;
 const LAUNCH_STATION = 'ILUMBY7';
 const GROUND_STATION = 'ILUMBY8';
 
-// Shown wherever a station reports nothing for a field.
-const NO_READING = '&mdash;';
+const NO_READING = readings.NO_READING;
 
 /**
  * Class for handling index page functionality
@@ -25,11 +25,11 @@ export class Index {
      * Build the windsock that sits on the dial. Its mouth faces the wind and the
      * tail streams downwind, the way a real sock hangs. The sock also fills out
      * with speed: limp and short when calm, fully extended by WINDSOCK_FULL.
-     * @param {number} windDir - Direction the wind is coming from, in degrees
+     * @param {number} rotation - Bearing the tail should stream towards, in degrees
      * @param {?number} windSpeed - Wind speed in km/h
      * @returns {string} SVG markup
      */
-    renderWindsock(windDir, windSpeed) {
+    renderWindsock(rotation, windSpeed) {
         const cx = 120, cy = 120;
         const fullLength = 116;
 
@@ -64,7 +64,7 @@ export class Index {
         }
 
         return `
-            <g class="windsock" style="transform: rotate(${windDir + 180}deg); transform-origin: ${cx}px ${cy}px;">
+            <g class="windsock" style="transform: rotate(${rotation}deg); transform-origin: ${cx}px ${cy}px;">
                 ${bands}
                 <ellipse cx="${cx}" cy="${mouthY}" rx="${mouthHalf}" ry="4"
                          fill="#ee6a10" stroke="#16202b" stroke-opacity=".35" stroke-width="1"/>
@@ -74,13 +74,13 @@ export class Index {
     /**
      * Build the wind rose: a fixed compass card carrying the windsock.
      * Ticks every 10°, cardinals at the quarters.
-     * @param {number} windDir - Direction the wind is coming from, in degrees
+     * @param {Object} wind - A shared wind reading: cardinal, bearing, rotation
      * @param {?number} windSpeed - Wind speed in km/h
      * @returns {string} SVG markup
      */
-    renderRose(windDir, windSpeed) {
+    renderRose(wind, windSpeed) {
         const cx = 120, cy = 120;
-        const bearing = Math.round(windDir);
+        const bearing = wind.bearing;
         let ticks = '';
 
         for (let deg = 0; deg < 360; deg += 10) {
@@ -104,12 +104,12 @@ export class Index {
 
         return `
             <svg class="rose" viewBox="0 0 240 240" role="img"
-                 aria-label="Wind from ${bearing} degrees">
+                 aria-label="Wind from ${wind.cardinal}, ${bearing} degrees">
                 <circle cx="${cx}" cy="${cy}" r="104" fill="#fbfaf7" stroke="#ddd8ce"/>
                 <circle cx="${cx}" cy="${cy}" r="62" fill="none" stroke="#ddd8ce" stroke-dasharray="2 5"/>
                 ${ticks}
                 ${cardinals}
-                ${this.renderWindsock(windDir, windSpeed)}
+                ${this.renderWindsock(wind.rotation, windSpeed)}
             </svg>`;
     }
 
@@ -147,10 +147,11 @@ export class Index {
      * @param {Object} stations - Per-station online flags
      * @returns {string} HTML markup
      */
-    renderLapseCell(lapse, stations) {
+    renderLapseCell(lapseRateInfo, stations) {
+        const lapse = readings.lapse(lapseRateInfo);
         const missing = [stations.launch, stations.ground].filter(s => s.id && !s.online);
 
-        if (!lapse || lapse.lapseRate === null) {
+        if (!lapse.available) {
             return `
                 <div class="stat-cell">
                     <span class="label"><span class="label-icon" aria-hidden="true">elevation</span>Lapse rate</span>
@@ -164,10 +165,10 @@ export class Index {
 
         return `
             <div class="stat-cell">
-                <span class="label"><span class="label-icon" aria-hidden="true">elevation</span>Lapse rate &middot; ${Math.round(Number(lapse.elevDiff)).toLocaleString()} ft split</span>
-                <p class="stat-value">${lapse.lapseRate}<span class="unit">ºC/1000 ft</span></p>
-                ${this.renderLapseScale(Number(lapse.lapseRate))}
-                <p class="stat-note"><span class="lapse-name">${lapse.details.name}</span> &mdash; ${lapse.details.description}</p>
+                <span class="label"><span class="label-icon" aria-hidden="true">elevation</span>Lapse rate &middot; ${lapse.elevDiff.toLocaleString()} ft split</span>
+                <p class="stat-value">${lapse.rate}<span class="unit">ºC/1000 ft</span></p>
+                ${this.renderLapseScale(lapse.rate)}
+                <p class="stat-note"><span class="lapse-name">${lapse.name}</span> &mdash; ${lapse.description}</p>
             </div>`;
     }
 
@@ -178,12 +179,13 @@ export class Index {
      * @returns {string} HTML markup
      */
     renderReadouts(observation, metrics) {
-        const uk = observation.uk_hybrid ?? {};
-        const value = (reading, digits = 1) =>
-            reading === null || reading === undefined ? NO_READING : Number(reading).toFixed(digits);
-
-        const readouts = [
-            {label: 'Temperature', icon: 'device_thermostat', value: value(uk.temp), unit: 'ºC'},
+        const readoutList = [
+            {
+                label: 'Temperature',
+                icon: 'device_thermostat',
+                value: readings.temperature(observation).celsius,
+                unit: 'ºC'
+            },
             {
                 label: 'Dew Point',
                 icon: 'opacity',
@@ -226,13 +228,24 @@ export class Index {
                 note: metrics.uvIndex ? `${metrics.uvIndex.risk} — ${metrics.uvIndex.description}` : undefined
             },
             {label: 'Solar Radiation', icon: 'brightness_7', value: observation.solarRadiation ?? NO_READING, unit: 'W/m²'},
-            {label: 'Rainfall', icon: 'water_drop', value: value(uk.precipTotal, 2), unit: 'mm', note: 'Total so far today'},
-            {label: 'Precipitation Rate', icon: 'grain', value: value(uk.precipRate, 2), unit: 'mm/hr'}
+            {
+                label: 'Rainfall',
+                icon: 'water_drop',
+                value: readings.rainfall(observation).millimetres,
+                unit: 'mm',
+                note: 'Total so far today'
+            },
+            {
+                label: 'Precipitation Rate',
+                icon: 'grain',
+                value: readings.precipitationRate(observation).rate,
+                unit: 'mm/hr'
+            }
         ];
 
         return `
             <section class="readouts">
-                ${readouts.map((item, i) => `
+                ${readoutList.map((item, i) => `
                     <div class="readout" style="--i: ${i}">
                         <span class="label"><span class="label-icon" aria-hidden="true">${item.icon}</span>${item.label}</span>
                         <p class="readout-value${item.value === NO_READING ? ' is-empty' : ''}">${item.value}${item.unit ? `<span class="unit">${item.unit}</span>` : ''}</p>
@@ -251,8 +264,7 @@ export class Index {
     renderStationView(view, lapse, stations) {
         const observation = view.observation;
         const uk = observation.uk_hybrid ?? {};
-        const value = (reading, digits = 1) =>
-            reading === null || reading === undefined ? NO_READING : Number(reading).toFixed(digits);
+        const wind = readings.wind(observation);
 
         const speedPct = Math.min((uk.windSpeed ?? 0) / WIND_SCALE, 1) * 100;
         const gustPct = Math.min((uk.windGust ?? 0) / WIND_SCALE, 1) * 100;
@@ -262,23 +274,23 @@ export class Index {
                  aria-labelledby="tab-${view.key}" data-view="${view.key}" hidden>
                 <section class="panel">
                     <div class="rose-cell">
-                        ${this.renderRose(observation.winddir, uk.windSpeed)}
+                        ${this.renderRose(wind, uk.windSpeed)}
                         <div class="rose-readout">
                             <span class="label"><span class="label-icon" aria-hidden="true">navigation</span>Wind from</span>
-                            <span class="cardinal">${weather.degreesToDirection(observation.winddir)}</span>
-                            <span class="bearing">${Math.round(observation.winddir)}°</span>
+                            <span class="cardinal">${wind.cardinal}</span>
+                            <span class="bearing">${wind.bearing}°</span>
                         </div>
                     </div>
 
                     <div class="stat-cell">
                         <span class="label"><span class="label-icon" aria-hidden="true">air</span>Wind speed</span>
-                        <p class="stat-value">${value(uk.windSpeed)}<span class="unit">km/h</span></p>
+                        <p class="stat-value">${wind.speed}<span class="unit">km/h</span></p>
                         <div class="gust-track">
                             <span class="gust-fill" style="width: ${gustPct}%"></span>
                             <span class="speed-fill" style="width: ${speedPct}%"></span>
                         </div>
                         <div class="gust-scale"><span>0</span><span>${WIND_SCALE}+ km/h</span></div>
-                        <p class="stat-note">Gusting to <strong>${value(uk.windGust)} km/h</strong></p>
+                        <p class="stat-note">Gusting to <strong>${wind.gust} km/h</strong></p>
                     </div>
 
                     ${this.renderLapseCell(lapse, stations)}

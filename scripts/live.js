@@ -1,4 +1,5 @@
 import weather from './weather.js';
+import * as readings from './readings.js';
 
 // Remembered across the page's own periodic reloads.
 const VIEW_KEY = 'live_view_mode';
@@ -223,6 +224,24 @@ export class Live {
     }
 
     /**
+     * Writes one tile's value, and its title when the tile carries a live one.
+     * @param {string} selector - The tile's container selector
+     * @param {string} value - The reading to show
+     * @param {?string} [title] - Replacement title, when it varies with the data
+     * @returns {void}
+     */
+    setReading(selector, value, title = null) {
+        const tile = document.querySelector(selector);
+        if (!tile) return;
+
+        tile.querySelector('.weather-value').textContent = value;
+
+        if (title !== null) {
+            tile.querySelector('.weather-title').textContent = title;
+        }
+    }
+
+    /**
      * Load and display weather data in the overlay
      * @returns {Promise<void>}
      */
@@ -235,33 +254,19 @@ export class Live {
             if (weatherData && weatherData.observation) {
                 const observation = weatherData.observation;
 
-                // Update wind: direction and speed read as one value, gust in the title
-                const windElement = document.querySelector('#wind .weather-value');
-                windElement.textContent =
-                    `${weather.degreesToDirection(observation.winddir)} ${observation.uk_hybrid.windSpeed} km/h`;
+                const wind = readings.wind(observation);
+                const lapse = readings.lapse(weatherData.lapseRateInfo);
 
-                // The wind blows *from* the cardinal shown, so the arrow points 180° away from it
-                const windIconElement = document.querySelector('#wind .weather-icon');
-                windIconElement.style = `transform: rotate(${observation.winddir + 180}deg);`;
+                // Wind: direction and speed read as one value, gust in the title.
+                // The rotation already accounts for the wind blowing *from* the
+                // cardinal shown, so the arrow points away from it.
+                this.setReading('#wind', wind.summary, wind.gustSummary);
+                document.querySelector('#wind .weather-icon').style =
+                    `transform: rotate(${wind.rotation}deg);`;
 
-                const windTitleElement = document.querySelector('#wind .weather-title');
-                windTitleElement.textContent = `Wind (gust ${observation.uk_hybrid.windGust} km/h)`;
-
-                // Update temperature at launch
-                const temperatureElement = document.querySelector('#temperature .weather-value');
-                temperatureElement.textContent = `${observation.uk_hybrid.temp} ºC`;
-
-                // Update rainfall
-                const rainfallElement = document.querySelector('#rainfall .weather-value');
-                rainfallElement.textContent = `${observation.uk_hybrid.precipTotal} mm`;
-
-                // Update lapse rate
-                const lapseRateElement = document.querySelector('#lapse-rate .weather-value');
-                lapseRateElement.textContent = `${weatherData.lapseRateInfo.lapseRate} ºC/1000 ft`;
-
-                // Update lapse rate title
-                const lapseRateTitleElement = document.querySelector('#lapse-rate .weather-title');
-                lapseRateTitleElement.textContent = `Lapse Rate: (${weatherData.lapseRateInfo.elevDiff}ft)`;
+                this.setReading('#temperature', readings.temperature(observation).summary);
+                this.setReading('#rainfall', readings.rainfall(observation).summary);
+                this.setReading('#lapse-rate', lapse.summary, lapse.title);
             }
         } catch (error) {
             console.error("Error updating weather overlay:", error);
