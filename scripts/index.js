@@ -28,12 +28,26 @@ export class Index {
      * one and not at all to anyone who has not — an arrow needs no explaining,
      * and the direction is written out beneath it either way.
      *
+     * At a station standing on a launch the arrow also carries the answer to
+     * the first question anyone asks: is it on the hill? Red for a wind outside
+     * the launch's window, and the ordinary blue for one inside it. A station
+     * with no launch configured has nothing to say about this and keeps the
+     * blue, so the colour never means "fine" by default — it only ever means
+     * "not reported as over the back".
+     *
+     * The wording says it too, because a colour on its own is no answer to
+     * anyone reading with a screen reader or through a colour deficiency.
+     *
      * @param {Object} wind - A shared wind reading: cardinal, rotation, words
      * @returns {string} HTML markup
      */
     renderWindArrow(wind) {
-        return `<span class="wind-arrow" role="img"
-                      aria-label="Wind from the ${wind.cardinalWords ?? 'unknown direction'}"
+        const offLaunch = wind.onLaunch === false;
+        const direction = wind.cardinalWords ?? 'unknown direction';
+
+        return `<span class="wind-arrow${offLaunch ? ' is-off-launch' : ''}" role="img"
+                      aria-label="Wind from the ${direction}${
+                          offLaunch ? ', outside the launch direction' : ''}"
                       style="transform: rotate(${wind.rotation}deg);">navigation</span>`;
     }
 
@@ -156,7 +170,7 @@ export class Index {
         return `
             <div class="view" id="panel-${key}" role="tabpanel" tabindex="0"
                  aria-labelledby="tab-${key}" data-view="${key}" hidden>
-                ${this.renderWindRow(readings.wind(entry.observation))}
+                ${this.renderWindRow(readings.wind(entry.observation, entry.station.launch))}
                 ${this.renderReadouts(entry.observation, entry.metrics, entry.air)}
                 ${trends.render(entry.station)}
             </div>`;
@@ -236,7 +250,7 @@ export class Index {
             if (!view || !entry.online) return;
 
             const wind = view.querySelector('.wind-row');
-            if (wind) wind.outerHTML = this.renderWindRow(readings.wind(entry.observation));
+            if (wind) wind.outerHTML = this.renderWindRow(readings.wind(entry.observation, entry.station.launch));
 
             const readouts = view.querySelector('.readouts');
             if (readouts) readouts.outerHTML = this.renderReadouts(entry.observation, entry.metrics, entry.air);

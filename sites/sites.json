@@ -9,6 +9,10 @@
           "short_name": "Coopers",
           "wunderground": "ILUMBY7",
           "cacheSeconds": 60,
+          "launch": {
+            "start": 100,
+            "end": 144
+          },
           "youtube": {
             "channel": "UCQt2u6plzHb6gyfrnCprwGA",
             "video": "nr7lhTb72cI"

@@ -17,6 +17,9 @@
     --rule-strong: #c3cad3;
     --accent: #1668b0;
     --accent-soft: #e9f2fa;
+    /* Dark enough to hold its contrast against the card behind it, rather than
+       the brighter red that reads as a warning label on white. */
+    --alarm: #c22b1f;
 
     --shadow: 0 1px 2px rgba(22, 32, 43, .05), 0 10px 24px -18px rgba(22, 32, 43, .35);
 
@@ -332,6 +335,13 @@ a { color: var(--accent); }
     line-height: 1;
     color: var(--accent);
     -webkit-font-smoothing: antialiased;
+}
+
+/* The wind is outside the launch's window — over the back, or across it. Only
+   ever set on a station that stands at a launch and can say so; everywhere else
+   the arrow keeps the accent, because no launch means no opinion. */
+.wind-arrow.is-off-launch {
+    color: var(--alarm);
 }
 
 /* The direction, named. The full wording stays on the arrow's label for anyone
