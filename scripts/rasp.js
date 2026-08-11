@@ -623,26 +623,11 @@ export function buildWindgram(entries, modelled = null, frame = null) {
         // report and it is what decides the strength of the day.
         const flux = heatFlux(irradiance, sounding.shareAt(modelled, time));
 
-        const lift = top !== null && flux !== null
-            ? updraft(top - surface.elevation, flux, surface.temp, surface.elevation)
-            : null;
-
         // Cloud base as a pilot works it out: the spread between temperature
         // and dew point at the surface, times the rate the two converge.
         const base = surface && isNumber(surface.dewpt)
             ? surface.elevation + LCL_PER_DEGREE * Math.max(0, surface.temp - surface.dewpt)
             : null;
-
-        // How high a wing still climbs, which is lower than where the bubble
-        // stops — and lower again when there is cloud in the way, because that
-        // is where the climb ends whatever the air is doing above it.
-        const usable = top !== null && lift !== null
-            ? climbTop(top, surface.elevation, lift)
-            : null;
-
-        const climbCeiling = usable !== null && base !== null
-            ? Math.min(usable, base)
-            : usable;
 
         const rain = aggregated.map(station => station[i].precipRate).filter(isNumber);
         const pressure = pressures && isNumber(pressures[i].pressure) ? pressures[i].pressure : null;
@@ -653,33 +638,65 @@ export function buildWindgram(entries, modelled = null, frame = null) {
             profile,
             segments,
             above,
+            // The climb figures are all worked out from the thermal top, and
+            // only once it has been smoothed. See below.
             thermalTop: top,
-            climbTop: climbCeiling,
+            flux,
+            surface,
             cloudBase: base !== null && base < ceiling ? base : null,
             shade,
             cloud: sounding.cloudAt(modelled, time),
-            lift,
             pressure,
             rain: rain.length ? Math.max(...rain) : null,
-            clouds: levels.length ? cloudBands(levels, floor, levels.at(-1).elevation) : []
+            // Only between the stations. Below the lowest one both the
+            // temperature and the dew point are being continued at their own
+            // gradients, and two straight lines with different slopes always
+            // meet: hatching there is a cloud layer invented by arithmetic in
+            // air nothing is standing in. The same argument the top of this
+            // function makes about extrapolating upward.
+            clouds: levels.length > 1
+                ? cloudBands(levels, levels[0].elevation, levels.at(-1).elevation)
+                : []
         });
     }
 
-    // The three lines that are crossings rather than readings, taken down the
-    // same way the forecast takes them and the RASP takes its own. Between two
-    // half-hourly columns the stations can disagree by a tenth of a degree,
-    // which is nothing as a temperature and several hundred metres as a thermal
-    // top — so the raw lines whipped up and down across a settled afternoon.
-    ['thermalTop', 'climbTop', 'cloudBase'].forEach(field => {
+    // Smoothed before anything is derived from them, exactly as the forecast
+    // does it. Both are crossings — the height where the parcel curve meets the
+    // sounding, and the height where the temperature meets the dew point — and
+    // between two half-hourly columns the stations can disagree by a tenth of a
+    // degree, which is nothing as a temperature and several hundred metres as a
+    // thermal top.
+    //
+    // The order matters and used to be wrong: the climb rate and the climb
+    // height were worked out from the raw thermal top while the *line* drawn
+    // for that top was smoothed, so the strip and the line were answering from
+    // two different numbers.
+    ['thermalTop', 'cloudBase'].forEach(field => {
         const smoothed = binomial(columns.map(column => column[field]));
         columns.forEach((column, index) => { column[field] = smoothed[index]; });
     });
 
-    // Cloudbase still ends the climb, whatever smoothing did to the pair.
     columns.forEach(column => {
-        if (column.climbTop === null || column.cloudBase === null) return;
+        const {thermalTop: top, flux, surface, cloudBase} = column;
 
-        column.climbTop = Math.min(column.climbTop, column.cloudBase);
+        column.lift = top !== null && flux !== null
+            ? updraft(top - surface.elevation, flux, surface.temp, surface.elevation)
+            : null;
+
+        // How high a wing still climbs, which is lower than where the bubble
+        // stops — and lower again when there is cloud in the way, because that
+        // is where the climb ends whatever the air is doing above it.
+        const usable = top !== null && column.lift
+            ? climbTop(top, surface.elevation, column.lift)
+            : null;
+
+        column.climbTop = usable !== null && cloudBase !== null
+            ? Math.min(usable, cloudBase)
+            : usable;
+
+        // Carried only so far as the derivation; nothing draws them.
+        delete column.flux;
+        delete column.surface;
     });
 
     return {

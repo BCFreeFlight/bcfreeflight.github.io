@@ -39,6 +39,13 @@ const GAS_CONSTANT = 287.05;
 // LATENT_SHARE for the one place it has no temperature to multiply by.
 const VIRTUAL_LATENT = 0.000245268;
 
+// R/cp, the exponent in Poisson's equation. The RASP's own figure, from the
+// molar values 8.314 / 29.19 J/mol/K. The textbook dry-air 2/7 = 0.28571 is
+// three parts in a thousand away from it and would move a climb rate by well
+// under a hundredth of a metre per second; this is here to match rather than
+// because the difference could be seen.
+const KAPPA = 0.28482;
+
 /**
  * The fallback share of sunlight that comes back as heat in the air rather than
  * going into evaporation, soil, or straight back out as reflection.
@@ -130,7 +137,7 @@ export function airDensity(elevation, temp, pressure = null) {
 export function potentialTemperature(elevation, temp, pressure = null) {
     const measured = pressure === null ? pressureAt(elevation) : pressure;
 
-    return (temp + 273.15) * Math.pow(100000 / measured, 0.28571);
+    return (temp + 273.15) * Math.pow(100000 / measured, KAPPA);
 }
 
 /**
@@ -229,9 +236,18 @@ export function thermalTop(levels, ceiling, {trigger = TRIGGER_OFFSET, step = 25
     const ground = levels[0].elevation;
     const surface = levels[0].temp + trigger;
 
+    // Bounded by the profile as well as by the drawing. Past the topmost level
+    // the environment is extrapolated from the gradient below it, and a parcel
+    // raced against a straight line will win for as long as the line is drawn —
+    // so a search that ran to the ceiling was really measuring the ceiling.
+    // That mattered doubly once the ceiling came to be built from these tops:
+    // the chart would have been answering its own question. The RASP scans the
+    // levels it has and no further, and so does this.
+    const limit = Math.min(ceiling, levels.at(-1).elevation);
+
     let previous = ground;
 
-    for (let height = ground + step; height <= ceiling; height += step) {
+    for (let height = ground + step; height <= limit; height += step) {
         const parcel = surface - DRY_ADIABAT * (height - ground);
         const environment = temperatureAt(levels, height);
 
@@ -248,8 +264,9 @@ export function thermalTop(levels, ceiling, {trigger = TRIGGER_OFFSET, step = 25
         previous = height;
     }
 
-    // Buoyant the whole way up. The ceiling is as much as this drawing knows.
-    return ceiling;
+    // Still buoyant at the top of the profile. The honest answer is "at least
+    // this high" rather than a height nothing was measured at.
+    return limit - ground < MINIMUM_DEPTH ? null : limit;
 }
 
 /**

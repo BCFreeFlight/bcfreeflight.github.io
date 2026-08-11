@@ -382,8 +382,13 @@ describe('how high a thermal gets', () => {
     // An inversion: warmer above than below, so nothing goes anywhere.
     const inverted = [{elevation: 500, temp: 10}, {elevation: 1500, temp: 15}];
 
-    it('runs to the ceiling when the air keeps cooling fast enough', () => {
-        equal(thermalTop(unstable, 3000), 3000);
+    it('stops at the top of the profile when the air keeps cooling fast enough', () => {
+        // Not at the ceiling. Above the topmost level the environment is a
+        // straight line continued from below, and a parcel raced against a
+        // straight line wins for as long as the line is drawn — so a search
+        // that ran to the ceiling would be measuring the drawing, not the air.
+        equal(thermalTop(unstable, 3000), unstable.at(-1).elevation);
+        equal(thermalTop(unstable, 1000), 1000, 'and at the ceiling when that is lower');
     });
 
     it('finds nothing under an inversion, given nothing to trigger on', () => {

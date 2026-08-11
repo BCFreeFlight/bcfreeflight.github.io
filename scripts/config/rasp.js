@@ -135,6 +135,8 @@ export const STRIPS = [
         zeroed: true,
         nice: 1,
         estimated: true,
+        // The RASP's own floor for admitting there is any lift to speak of.
+        threshold: 0.2,
         read: column => column.lift
     },
     {
@@ -178,6 +180,7 @@ export const STRIPS = [
         digits: 2,
         zeroed: true,
         nice: 1,
+        threshold: 0.02,
         read: column => column.rain
     }
 ];
