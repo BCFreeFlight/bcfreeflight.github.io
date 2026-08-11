@@ -31,6 +31,11 @@ export const RETRY_MS = 60 * 1000;
 // only re-reads the same day.
 export const HISTORY_CACHE_SECONDS = 5 * 60;
 
+// Air quality is published hourly and moves slowly, so it is held far longer
+// than a station reading. Half an hour keeps a page that refreshes every minute
+// from asking sixty times for the same number.
+export const AIR_CACHE_SECONDS = 30 * 60;
+
 // Checking the camera costs a hidden player, so it lags well behind the
 // readings rather than running with them.
 export const CAMERA_CHECK_MS = 5 * 60 * 1000;
@@ -71,6 +76,9 @@ export const PLAYER_PARAMS = {
 export const STORAGE_KEYS = {
     observation: id => `weather_cache_${id}`,
     day: id => `weather_history_${id}`,
+    // Keyed by place rather than by station, because the air does not belong to
+    // any one of them: two stations on the same hillside read the same square.
+    air: (latitude, longitude) => `air_quality_${latitude}_${longitude}`,
     liveView: 'live_view_mode',
     liveWeather: 'live_weather_visible',
     trendSeries: 'trend_series',

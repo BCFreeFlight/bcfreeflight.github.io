@@ -146,6 +146,27 @@ export const SERIES = [
 ];
 
 /**
+ * Air quality, which is not a station measurement either: it comes from a model
+ * of the square the station stands in, so it is described here and assembled in
+ * `air-series.js` rather than read out of a bucket.
+ *
+ * Sienna because every other line is spoken for, and because smoke is the thing
+ * this draws nine times out of ten.
+ *
+ * @type {Object}
+ */
+export const AIR_SERIES = {
+    key: 'usAqi',
+    floor: 0,
+    label: 'Air quality',
+    unit: 'AQI',
+    colour: '#a05a2c',
+    group: 'air',
+    on: true,
+    digits: 0
+};
+
+/**
  * The colours the lapse-rate lines cycle through. Kept apart from the station
  * measurements above because a lapse rate is not one: it belongs to a pair of
  * stations, and how many lines there are depends on how many are reporting.

@@ -1,11 +1,13 @@
 import history from './history.js';
-import {SERIES} from './config/series.js';
+import air from './air.js';
+import {SERIES, AIR_SERIES} from './config/series.js';
 import {STORAGE_KEYS} from './config/defaults.js';
 import {readJson, writeJson} from './lib/storage.js';
 import {Chart} from './chart.js';
 import {Windgram} from './windgram.js';
 import {buildWindgram} from './rasp.js';
 import {lapsePairs, lapseColumn} from './lapse-series.js';
+import {airColumn} from './air-series.js';
 
 /**
  * The day's readings, as a panel.
@@ -26,6 +28,7 @@ export class Trends {
     constructor() {
         this.panels = new Map();
         this.days = new Map();
+        this.airs = new Map();
         this.pairs = [];
         this.selected = readJson(STORAGE_KEYS.trendSeries, null);
         this.mode = readJson(STORAGE_KEYS.trendMode, 'split');
@@ -141,6 +144,12 @@ export class Trends {
             } catch (error) {
                 console.error(`Could not read the day for ${panel.station.id}:`, error);
             }
+
+            // Beside the day rather than inside it, because it is not the
+            // station's reading: the panel already knows where it stands, and
+            // panels in the same grid square share the one request.
+            const overhead = await air.load(panel.latitude, panel.longitude);
+            if (overhead) this.airs.set(panel.station.key, overhead);
         }));
 
         this.pairs = lapsePairs(panels.map(panel => ({
@@ -281,7 +290,7 @@ export class Trends {
      * @returns {Object[]} Series definitions
      */
     catalogue() {
-        return [...SERIES, ...this.pairs];
+        return [...SERIES, ...this.pairs, AIR_SERIES];
     }
 
     /**
@@ -295,10 +304,11 @@ export class Trends {
     }
 
     /**
-     * A station's day with the lapse-rate lines folded in.
+     * A station's day with everything that is not its own reading folded in:
+     * the lapse rates between it and its neighbours, and the air over it.
      *
-     * They are computed against that station's own reading times, so they can
-     * sit on the same crosshair as everything else on its chart.
+     * All of it is computed against that station's own reading times, so every
+     * line sits on the same crosshair as the measurements it was logged beside.
      *
      * @param {Object} panel - A mounted panel
      * @returns {?Object} The day, or null when the station logged nothing
@@ -311,6 +321,9 @@ export class Trends {
         this.pairs.forEach(pair => {
             values[pair.key] = lapseColumn(pair, day.times);
         });
+
+        const overhead = airColumn(this.airs.get(panel.station.key), day.times);
+        if (overhead) values[AIR_SERIES.key] = overhead;
 
         return {...day, values};
     }

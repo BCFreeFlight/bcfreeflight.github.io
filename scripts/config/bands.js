@@ -40,6 +40,26 @@ export const UV = [
     {risk: 'Extreme', max: Infinity, description: 'Extreme risk: Stay indoors'}
 ];
 
+/**
+ * US Air Quality Index. The EPA's own categories and their colours, which are
+ * the ones every air quality map is drawn in, so the wording here matches what
+ * a pilot has already seen elsewhere that day.
+ *
+ * The advice is written for flying rather than for staying indoors: launching
+ * means hiking up with a wing on your back and then sitting in the air for
+ * hours, which is a long time breathing hard in whatever the valley is holding.
+ *
+ * @type {Object[]}
+ */
+export const AIR_QUALITY = [
+    {name: 'Good', max: 50, color: '#00e400', description: 'Clear air, nothing to plan around'},
+    {name: 'Moderate', max: 100, color: '#ffff00', description: 'Fine for most, noticeable on a long climb out'},
+    {name: 'Unhealthy for Sensitive Groups', max: 150, color: '#ff7e00', description: 'Asthma and sensitive lungs should sit this one out'},
+    {name: 'Unhealthy', max: 200, color: '#ff0000', description: 'Everyone feels this one, so keep flights short'},
+    {name: 'Very Unhealthy', max: 300, color: '#8f3f97', description: 'Smoke thick enough to cut visibility and lift alike'},
+    {name: 'Hazardous', max: Infinity, color: '#7e0023', description: 'Not a flying day'}
+];
+
 /** @type {Object[]} Sea-level equivalent pressure, in kPa. */
 export const PRESSURE = [
     {name: 'Very Low', max: 98, description: 'Storms, maybe even severe weather'},

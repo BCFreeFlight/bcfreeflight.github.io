@@ -1,5 +1,6 @@
 import time from './time.js';
 import weather from './weather.js';
+import air from './air.js';
 import sites from './sites.js';
 import youtube from './youtube.js';
 import trends from './trends.js';
@@ -86,17 +87,18 @@ export class Index {
      *
      * @param {Object} observation - A station observation
      * @param {Object} metrics - Interpreted metrics for that same observation
+     * @param {?Object} airQuality - The air over the station, when it is known
      * @returns {string} HTML markup
      */
-    renderReadouts(observation, metrics) {
+    renderReadouts(observation, metrics, airQuality) {
         const readoutList = READOUTS.map(readout => ({
             label: readout.label,
             icon: readout.icon,
-            value: readout.read(observation, metrics) ?? NO_READING,
+            value: readout.read(observation, metrics, airQuality) ?? NO_READING,
             unit: typeof readout.unit === 'function'
-                ? readout.unit(observation, metrics)
+                ? readout.unit(observation, metrics, airQuality)
                 : readout.unit,
-            note: readout.note?.(observation, metrics)
+            note: readout.note?.(observation, metrics, airQuality)
         }));
 
         return `
@@ -155,7 +157,7 @@ export class Index {
             <div class="view" id="panel-${key}" role="tabpanel" tabindex="0"
                  aria-labelledby="tab-${key}" data-view="${key}" hidden>
                 ${this.renderWindRow(readings.wind(entry.observation))}
-                ${this.renderReadouts(entry.observation, entry.metrics)}
+                ${this.renderReadouts(entry.observation, entry.metrics, entry.air)}
                 ${trends.render(entry.station)}
             </div>`;
     }
@@ -237,7 +239,7 @@ export class Index {
             if (wind) wind.outerHTML = this.renderWindRow(readings.wind(entry.observation));
 
             const readouts = view.querySelector('.readouts');
-            if (readouts) readouts.outerHTML = this.renderReadouts(entry.observation, entry.metrics);
+            if (readouts) readouts.outerHTML = this.renderReadouts(entry.observation, entry.metrics, entry.air);
         });
 
         // The charts read their own day on their own cadence; this asks them to
@@ -438,6 +440,32 @@ export class Index {
     }
 
     /**
+     * Hangs the air over each station onto its entry.
+     *
+     * The coordinates come from the observations themselves, so this can only
+     * run once the stations have answered. Stations near each other resolve to
+     * the same grid square and share a single request, and a station that is
+     * dark simply gets nothing — there is nowhere to ask about.
+     *
+     * A failure here is left as a missing tile rather than raised: the readings
+     * are the page, and air quality is one line beside them.
+     *
+     * @param {Object[]} loaded - Station entries from Weather.loadStations
+     * @returns {Promise<void>}
+     */
+    async loadAir(loaded) {
+        await Promise.all(loaded.map(async entry => {
+            if (!entry.online) return;
+
+            try {
+                entry.air = await air.load(entry.observation.lat, entry.observation.lon);
+            } catch (error) {
+                console.error('Could not read the air quality:', error);
+            }
+        }));
+    }
+
+    /**
      * Queues the next read at the site's own cadence.
      *
      * The interval is the shortest cache timeout in the configuration, so each
@@ -468,6 +496,11 @@ export class Index {
             this.renderSiteIdentity(site);
 
             const loaded = await weather.loadStations(sites.inTabOrder(site.stations));
+
+            // Needs the stations first: the coordinates to ask about are in
+            // their observations. Held for half an hour, so most refreshes come
+            // straight back from cache.
+            await this.loadAir(loaded);
 
             // Whichever stations answered. One being dark never hides the others.
             const enabled = loaded.filter(entry => entry.online);
