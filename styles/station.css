@@ -10,16 +10,8 @@
     --page: #ffffff;
     --surface: #ffffff;
     --surface-soft: #f6f7f8;
-    --ink: #16202b;
-    --ink-muted: #5b6672;
-    --ink-faint: #8792a0;
     --rule: #dfe3e8;
     --rule-strong: #c3cad3;
-    --accent: #1668b0;
-    --accent-soft: #e9f2fa;
-    /* Dark enough to hold its contrast against the card behind it, rather than
-       the brighter red that reads as a warning label on white. */
-    --alarm: #c22b1f;
 
     --shadow: 0 1px 2px rgba(22, 32, 43, .05), 0 10px 24px -18px rgba(22, 32, 43, .35);
 

@@ -6,6 +6,9 @@ import {lapseRate, pairByElevation} from '../scripts/lib/lapse.js';
 import {Loop} from '../scripts/lib/loop.js';
 import {pointAt, POINTS} from '../scripts/config/compass.js';
 import * as bands from '../scripts/config/bands.js';
+import {colour, colours} from '../scripts/config/palette.js';
+import {SERIES, AIR_SERIES, SKY_SERIES, LAPSE_COLOURS} from '../scripts/config/series.js';
+import {STRIPS} from '../scripts/config/rasp.js';
 
 describe('numbers: is this a reading at all?', () => {
     it('accepts numbers, including zero and negatives', () => {
@@ -291,5 +294,55 @@ describe('the refresh loop', () => {
         loop.cancel();
         await new Promise(resolve => setTimeout(resolve, 40));
         equal(ran, 0);
+    });
+});
+
+describe('the palette', () => {
+    it('hands back a colour by name', () => {
+        ok(/^#[0-9a-f]{6}$/i.test(colour('series-temp')), colour('series-temp'));
+    });
+
+    it('resolves a token defined in terms of another', () => {
+        // The wind line is the accent, said once. If the indirection stopped
+        // resolving this would come back empty rather than blue.
+        equal(colour('series-wind'), colour('accent'));
+    });
+
+    it('takes several at once, in order', () => {
+        equal(colours('series-shade', 'series-cloud'),
+            [colour('series-shade'), colour('series-cloud')]);
+    });
+
+    it('refuses a colour that is not in the palette', () => {
+        // Loudly, rather than drawing something almost right: a token can only
+        // fail to resolve if the stylesheet is missing altogether.
+        try {
+            colour('series-nothing-like-this');
+            ok(false, 'should have thrown');
+        } catch (error) {
+            ok(error.message.includes('--series-nothing-like-this'), error.message);
+            ok(error.message.includes('palette.css'), 'and says where to look');
+        }
+    });
+
+    it('is the only place a colour is written down', () => {
+        // The whole point. A hex code back in the configuration is a colour the
+        // stylesheet cannot see, and the pair drift from there.
+        const sources = ['series', 'rasp', 'bands'].map(name =>
+            fetch(`../scripts/config/${name}.js`).then(response => response.text()));
+
+        return Promise.all(sources).then(texts => texts.forEach((text, index) => {
+            const hex = text.match(/#[0-9a-fA-F]{3,8}\b/g);
+            equal(hex, null, `${['series', 'rasp', 'bands'][index]}.js: ${hex}`);
+        }));
+    });
+
+    it('carries every colour the drawing code asks for', () => {
+        // Reading each one is the assertion: a missing token throws.
+        [...SERIES, AIR_SERIES, ...SKY_SERIES, ...STRIPS]
+            .forEach(item => ok(item.colour.length, item.key));
+
+        LAPSE_COLOURS.forEach(value => ok(value.length));
+        [...bands.LAPSE, ...bands.AIR_QUALITY].forEach(band => ok(band.color.length, band.name));
     });
 });

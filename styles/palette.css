@@ -1,0 +1,102 @@
+/**
+ * Every colour the site draws with, in one place.
+ *
+ * Half of this site's colour is applied by a stylesheet and half of it by
+ * JavaScript — the charts, the windgram and the barbs are SVG built at runtime,
+ * and they cannot reach a class. So the same blue used to be written out in
+ * both places, and the two drifted: the wind line and the accent were the same
+ * blue by coincidence rather than by declaration, and nothing would have said so
+ * if one of them changed.
+ *
+ * Custom properties fix that without a build step and without a second network
+ * request. The browser already resolves them before any module runs, so
+ * `config/palette.js` reads these same values straight off the root element and
+ * hands them to the drawing code. One definition, two consumers, no copy.
+ *
+ * Anything used only by one rule in one stylesheet does not belong here. This is
+ * for colours with more than one home.
+ */
+
+:root {
+    /* --- The site itself ---------------------------------------------- */
+
+    --ink: #16202b;
+    --ink-muted: #5b6672;
+    --ink-faint: #8792a0;
+
+    --accent: #1668b0;
+    --accent-soft: #e9f2fa;
+
+    /* Dark enough to hold its contrast against a white card, rather than the
+       brighter red that reads as a warning label. Used wherever the site says
+       "no": a wind outside the launch direction, and nothing else yet. */
+    --alarm: #c22b1f;
+
+    /* --- The chart lines ---------------------------------------------- */
+
+    /* One per measurement, chosen to stay apart from each other when several
+       are overlaid on one axis. Read by config/series.js. */
+    --series-temp: #d92c2c;
+    --series-dewpt: #2f8f46;
+    --series-wind: var(--accent);
+    --series-gust: #e07b1f;
+    /* Slate rather than another blue: wind speed is already blue, and in the
+       overlay the two were near enough to be taken for one line. */
+    --series-winddir: #4b5563;
+    --series-humidity: #0f8f8f;
+    --series-pressure: #7a4fbf;
+    --series-solar: #e0a81f;
+    --series-uv: #8f2f8f;
+    --series-rain-rate: #7ac043;
+    --series-rain-total: #2f9fd0;
+    /* Sienna, because every other line is spoken for and because smoke is what
+       this draws nine times out of ten. */
+    --series-air: #a05a2c;
+
+    /* Near-black against a bright sky blue. Both were muted to begin with,
+       which is the right idea and the wrong execution: at the width of a chart
+       line they read as one colour in two moods. Separating them by lightness
+       as well as hue is what makes the gap between measured shade and modelled
+       cloud legible, and that gap is the whole reason both are drawn. */
+    --series-shade: #3f3f46;
+    --series-cloud: #38bdf8;
+
+    /* The cycle the lapse-rate lines run through. A lapse rate belongs to a
+       pair of stations rather than to one, so how many lines there are depends
+       on how many stations are reporting. */
+    --lapse-line-a: #b5442f;
+    --lapse-line-b: #0f7d8f;
+    --lapse-line-c: #8a5a12;
+
+    /* --- The windgram strips ------------------------------------------ */
+
+    /* Cloud and shade deliberately reuse the chart's pair above, so a reader
+       moving between the drawing and the chart is not relearning them. */
+    --strip-pressure: #c0392b;
+    --strip-lift: #c9b528;
+    --strip-rain: #2ec4b6;
+
+    /* --- The bands ---------------------------------------------------- */
+
+    /* Stability, from thermic to capped. These run warm-to-cool on purpose:
+       the red end is the day worth driving for. */
+    --lapse-unstable: #ff0000;
+    --lapse-conditional-strong: #ff8000;
+    --lapse-conditional: #ffb6ff;
+    --lapse-conditional-weak: #dcb7ff;
+    --lapse-stable-warm: #fddbb0;
+    --lapse-stable: #8080ff;
+    --lapse-stable-cool: #c0cfff;
+    --lapse-inverted: #d3d3d3;
+    --lapse-capped: #808080;
+
+    /* The US EPA's own AQI colours, and not ours to restyle: people recognise
+       this scale from every other air quality map, and a prettier green would
+       only make it harder to read. */
+    --aqi-good: #00e400;
+    --aqi-moderate: #ffff00;
+    --aqi-sensitive: #ff7e00;
+    --aqi-unhealthy: #ff0000;
+    --aqi-very-unhealthy: #8f3f97;
+    --aqi-hazardous: #7e0023;
+}

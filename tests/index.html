@@ -4,6 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tests — BC Free Flight</title>
+    <!-- The palette, because the drawing code reads its colours off the root
+         element rather than carrying a second copy of them. Without this the
+         chart configuration cannot even be imported, which is the point: a page
+         that draws has to say where its colours come from. -->
+    <link rel="stylesheet" href="../styles/palette.css">
     <style>
         :root { color-scheme: light dark; }
 

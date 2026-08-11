@@ -1,4 +1,5 @@
 import {pointAt} from './compass.js';
+import {colour, colours} from './palette.js';
 
 /**
  * The measurements available to chart, in the order they are offered.
@@ -20,7 +21,7 @@ export const SERIES = [
         key: 'temp',
         label: 'Temperature',
         unit: 'ºC',
-        colour: '#d92c2c',
+        colour: colour('series-temp'),
         group: 'temp',
         on: true,
         read: row => row.uk_hybrid?.tempAvg
@@ -29,7 +30,7 @@ export const SERIES = [
         key: 'dewpt',
         label: 'Dew point',
         unit: 'ºC',
-        colour: '#2f8f46',
+        colour: colour('series-dewpt'),
         group: 'temp',
         on: true,
         read: row => row.uk_hybrid?.dewptAvg
@@ -39,7 +40,7 @@ export const SERIES = [
         floor: 0,
         label: 'Wind speed',
         unit: 'km/h',
-        colour: '#1668b0',
+        colour: colour('series-wind'),
         group: 'wind',
         on: true,
         read: row => row.uk_hybrid?.windspeedAvg
@@ -49,7 +50,7 @@ export const SERIES = [
         floor: 0,
         label: 'Wind gust',
         unit: 'km/h',
-        colour: '#e07b1f',
+        colour: colour('series-gust'),
         group: 'wind',
         on: true,
         // Each gust is a moment, not a trend: joining them into a line would
@@ -62,9 +63,7 @@ export const SERIES = [
         key: 'windDir',
         label: 'Wind direction',
         unit: 'º',
-        // Slate rather than another blue: wind speed is already blue, and in
-        // the overlay the two were near enough to be taken for one line.
-        colour: '#4b5563',
+        colour: colour('series-winddir'),
         group: 'direction',
         on: true,
         // A compass wraps, so 359º to 1º is one degree of change and a line
@@ -84,7 +83,7 @@ export const SERIES = [
         floor: 0,
         label: 'Humidity',
         unit: '%',
-        colour: '#0f8f8f',
+        colour: colour('series-humidity'),
         group: 'humidity',
         read: row => row.humidityAvg
     },
@@ -92,7 +91,7 @@ export const SERIES = [
         key: 'pressure',
         label: 'Pressure',
         unit: 'kPa',
-        colour: '#7a4fbf',
+        colour: colour('series-pressure'),
         group: 'pressure',
         digits: 1,
         read: row => (row.uk_hybrid?.pressureMax ?? null) === null
@@ -104,7 +103,7 @@ export const SERIES = [
         floor: 0,
         label: 'Solar radiation',
         unit: 'W/m²',
-        colour: '#e0a81f',
+        colour: colour('series-solar'),
         group: 'solar',
         on: true,
         digits: 0,
@@ -115,7 +114,7 @@ export const SERIES = [
         floor: 0,
         label: 'UV index',
         unit: '',
-        colour: '#8f2f8f',
+        colour: colour('series-uv'),
         group: 'uv',
         on: true,
         digits: 1,
@@ -126,7 +125,7 @@ export const SERIES = [
         floor: 0,
         label: 'Rain rate',
         unit: 'mm/hr',
-        colour: '#7ac043',
+        colour: colour('series-rain-rate'),
         group: 'precip',
         on: true,
         digits: 2,
@@ -137,7 +136,7 @@ export const SERIES = [
         floor: 0,
         label: 'Rain today',
         unit: 'mm',
-        colour: '#2f9fd0',
+        colour: colour('series-rain-total'),
         group: 'precip',
         on: true,
         digits: 2,
@@ -150,9 +149,6 @@ export const SERIES = [
  * of the square the station stands in, so it is described here and assembled in
  * `air-series.js` rather than read out of a bucket.
  *
- * Sienna because every other line is spoken for, and because smoke is the thing
- * this draws nine times out of ten.
- *
  * @type {Object}
  */
 export const AIR_SERIES = {
@@ -160,7 +156,7 @@ export const AIR_SERIES = {
     floor: 0,
     label: 'Air quality',
     unit: 'AQI',
-    colour: '#a05a2c',
+    colour: colour('series-air'),
     group: 'air',
     on: true,
     digits: 0
@@ -191,13 +187,7 @@ export const SKY_SERIES = [
         floor: 0,
         label: 'Shade',
         unit: '%',
-        // Near-black against a bright sky blue. The two were a grey and a
-        // muted blue to begin with, which is the right idea and the wrong
-        // execution: at the width of a chart line they read as one colour in
-        // two moods. Separating them by lightness as well as hue is what makes
-        // the gap between measured and modelled legible at a glance — and that
-        // gap is the whole reason both are drawn.
-        colour: '#3f3f46',
+        colour: colour('series-shade'),
         group: 'sky',
         digits: 0
     },
@@ -206,7 +196,7 @@ export const SKY_SERIES = [
         floor: 0,
         label: 'Cloud cover',
         unit: '%',
-        colour: '#38bdf8',
+        colour: colour('series-cloud'),
         group: 'sky',
         digits: 0
     }
@@ -216,6 +206,7 @@ export const SKY_SERIES = [
  * The colours the lapse-rate lines cycle through. Kept apart from the station
  * measurements above because a lapse rate is not one: it belongs to a pair of
  * stations, and how many lines there are depends on how many are reporting.
+ * Why these three, and not others, is in styles/palette.css with the values.
  * @type {string[]}
  */
-export const LAPSE_COLOURS = ['#b5442f', '#0f7d8f', '#8a5a12'];
+export const LAPSE_COLOURS = colours('lapse-line-a', 'lapse-line-b', 'lapse-line-c');
