@@ -43,6 +43,81 @@ const HIT_RADIUS = 13;
 const TIP = {width: 78, height: 36, gap: 10};
 
 /**
+ * How finely the stability field is sampled, in pixels.
+ *
+ * A row per pixel down the panel, because the eye picks out a one-pixel jog in a
+ * near-horizontal band edge immediately, and two pixels across, because it does
+ * not pick out the same jog sideways. Cheap either way: the field is walked with
+ * a moving index rather than searched, so this is a few hundred thousand
+ * additions on a redraw.
+ */
+const FIELD_STEP = {x: 2, y: 1};
+
+/**
+ * A path through points, curved rather than ruled.
+ *
+ * The model publishes on the hour, and a line drawn straight between those
+ * hours arrives with a visible corner at every one of them — which reads as the
+ * air changing direction on the hour, when it is really the drawing running out
+ * of samples. A Catmull-Rom spline through the same points has no corners and
+ * claims nothing extra: it still passes through every value the model gave.
+ *
+ * @param {Object[]} points - {x, y} in order
+ * @returns {string} An SVG path definition
+ */
+function curveThrough(points) {
+    const at = point => `${point.x.toFixed(1)} ${point.y.toFixed(1)}`;
+
+    if (points.length < 3) {
+        return points.map((point, index) => `${index ? 'L' : 'M'}${at(point)}`).join('');
+    }
+
+    let d = `M${at(points[0])}`;
+
+    for (let i = 0; i < points.length - 1; i++) {
+        const before = points[i - 1] ?? points[i];
+        const from = points[i];
+        const to = points[i + 1];
+        const after = points[i + 2] ?? to;
+
+        // The classic Catmull-Rom to Bézier conversion: each control point is a
+        // sixth of the way along the chord through its neighbours.
+        const first = {x: from.x + (to.x - before.x) / 6, y: from.y + (to.y - before.y) / 6};
+        const second = {x: to.x - (after.x - from.x) / 6, y: to.y - (after.y - from.y) / 6};
+
+        d += `C${at(first)} ${at(second)} ${at(to)}`;
+    }
+
+    return d;
+}
+
+/**
+ * A lapse rate at a height, from the samples up one column.
+ *
+ * Held flat below the lowest sample and above the highest rather than
+ * extrapolated: past the last layer the model published there is no gradient to
+ * continue, and inventing one would paint a band nothing forecast.
+ *
+ * @param {Object[]} points - Ascending {elevation, rate}
+ * @param {number} metres - The height to read
+ * @param {number} from - Where in the samples to start looking
+ * @returns {number} ºC per 1000 ft
+ */
+function rateAtFrom(points, metres, from) {
+    if (metres <= points[0].elevation) return points[0].rate;
+
+    const last = points.at(-1);
+    if (metres >= last.elevation) return last.rate;
+
+    const below = points[from];
+    const above = points[from + 1];
+    const share = (metres - below.elevation) / (above.elevation - below.elevation);
+
+    return below.rate + share * (above.rate - below.rate);
+}
+
+
+/**
  * Round numbers for a strip's axis.
  * @param {number[]} values - The readings in the strip
  * @param {Object} strip - Its definition
@@ -54,6 +129,12 @@ function stripScale(values, strip) {
 
     const low = Math.min(...values);
     const high = Math.max(...values);
+
+    // A strip whose whole day sits under its threshold is left as an empty
+    // frame. The RASP does the same with its lift and rain rows, and for the
+    // same reason: a day with a hundredth of a millimetre of drizzle in it,
+    // scaled to fill the strip, reads as weather when it is nothing at all.
+    if (strip.threshold !== undefined && high < strip.threshold) return null;
 
     if (strip.zeroed) {
         // Rain and lift are quantities, not levels: their baseline is nothing,
@@ -70,11 +151,26 @@ function stripScale(values, strip) {
 
 export class Windgram {
     /**
+     * The same drawing serves the day that has happened and the day that is
+     * forecast. What differs between them is not geometry — it is which strips
+     * run along the top, how high the barbs are lifted off their level, and what
+     * the drawing has to admit about where its numbers came from. Those are
+     * options; everything else reads the model.
+     *
      * @param {HTMLElement} host - The element the drawing goes into
+     * @param {Object} [options] - strips, barbOffsetFeet, empty and footnotes
      */
-    constructor(host) {
+    constructor(host, options = {}) {
         this.host = host;
         this.model = null;
+
+        this.strips = options.strips ?? STRIPS;
+        this.barbOffsetFeet = options.barbOffsetFeet ?? BARB_OFFSET_FEET;
+        this.empty = options.empty ?? 'Not enough logged today to draw the profile yet.';
+        // Only the forecast has the resolution to justify smoothing between its
+        // levels. See `renderStabilityField`.
+        this.smooth = options.smooth ?? false;
+        this.sentences = options.footnotes ?? (model => this.measuredFootnotes(model));
 
         this.redraw = () => this.draw();
 
@@ -135,6 +231,39 @@ export class Windgram {
     }
 
     /**
+     * A path through points — curved where the drawing is a continuous field,
+     * ruled where it is a handful of measurements that should look like one.
+     * @param {Object[]} points - {x, y} in order
+     * @returns {string} An SVG path definition
+     */
+    path(points) {
+        if (this.smooth) return curveThrough(points);
+
+        return points.map((point, index) =>
+            `${index ? 'L' : 'M'}${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join('');
+    }
+
+    /**
+     * The moment at an x coordinate — `x` run backwards.
+     * @param {number} x - An x coordinate
+     * @returns {number} Milliseconds
+     */
+    timeAt(x) {
+        const span = Math.max(this.model.lastTime - this.model.dayStart, HOUR);
+        return this.model.dayStart + ((x - this.left) / (this.right - this.left)) * span;
+    }
+
+    /**
+     * The height at a y coordinate — `y` run backwards.
+     * @param {number} y - A y coordinate
+     * @returns {number} Metres above sea level
+     */
+    metresAt(y) {
+        const {floor, ceiling} = this.model;
+        return floor + ((this.bottom - y) / (this.bottom - this.top)) * (ceiling - floor);
+    }
+
+    /**
      * Draws at whatever size the container currently is.
      * @returns {void}
      */
@@ -145,15 +274,14 @@ export class Windgram {
         if (!width) return;
 
         if (!this.model?.columns?.length) {
-            this.host.innerHTML =
-                '<p class="chart-empty">Not enough logged today to draw the profile yet.</p>';
+            this.host.innerHTML = `<p class="chart-empty">${escape(this.empty)}</p>`;
             return;
         }
 
         this.left = LAYOUT.left;
         this.right = width - LAYOUT.right;
 
-        const strips = STRIPS.length * (LAYOUT.strip + LAYOUT.stripGap);
+        const strips = this.strips.length * (LAYOUT.strip + LAYOUT.stripGap);
         this.top = LAYOUT.top + strips + LAYOUT.stripToPanel;
         this.bottom = this.top + LAYOUT.panel;
 
@@ -218,7 +346,9 @@ export class Windgram {
      * @returns {number} Width, never less than a hairline
      */
     columnWidth() {
-        return Math.max(1, this.x(this.model.dayStart + COLUMN_MS) - this.x(this.model.dayStart));
+        const span = this.model.columnMs ?? COLUMN_MS;
+
+        return Math.max(1, this.x(this.model.dayStart + span) - this.x(this.model.dayStart));
     }
 
     /**
@@ -264,7 +394,7 @@ export class Windgram {
      * @returns {string} SVG markup
      */
     renderStrips() {
-        return STRIPS.map((strip, index) => {
+        return this.strips.map((strip, index) => {
             const top = LAYOUT.top + index * (LAYOUT.strip + LAYOUT.stripGap);
             const bottom = top + LAYOUT.strip;
 
@@ -295,9 +425,9 @@ export class Windgram {
                 if (run.length < 2) { run = []; return; }
 
                 area += `<path class="windgram-strip-fill" fill="${strip.colour}"
-                               d="M${run[0].x.toFixed(1)} ${bottom.toFixed(1)}`
-                    + run.map(point => `L${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join('')
-                    + `L${run.at(-1).x.toFixed(1)} ${bottom.toFixed(1)}Z"></path>`;
+                               d="M${run[0].x.toFixed(1)} ${bottom.toFixed(1)}L${
+                                   this.path(run).slice(1)}L${
+                                   run.at(-1).x.toFixed(1)} ${bottom.toFixed(1)}Z"></path>`;
 
                 run = [];
             };
@@ -357,6 +487,8 @@ export class Windgram {
      * @returns {string} SVG markup
      */
     renderStability() {
+        if (this.smooth && this.model.columns.length > 1) return this.renderStabilityField();
+
         const width = this.columnWidth();
 
         const cells = this.model.columns.map(column => {
@@ -387,6 +519,138 @@ export class Windgram {
                   y1="${this.y(top).toFixed(1)}" y2="${this.y(top).toFixed(1)}"></line>`;
 
         return `<g class="windgram-stability">${cells}${boundary}</g>`;
+    }
+
+    /**
+     * The coloured air, as a field rather than as a stack of blocks.
+     *
+     * A slab of air between two model levels is five hundred metres deep and an
+     * hour wide, and drawing one rectangle per slab makes the sky look like
+     * masonry — which is both ugly and a lie, because the boundary between
+     * unstable and stable air is a surface running diagonally through the day,
+     * not a staircase.
+     *
+     * The RASP solves this by contour-filling, and this does the same thing by
+     * the same reasoning: a layer's lapse rate is treated as a sample at the
+     * middle of that layer rather than as a property of the whole block, the
+     * samples are interpolated in height and in time, and the result is
+     * flood-filled by band. Nothing new is claimed — the samples are exactly the
+     * numbers the model published — but the picture between them is continuous,
+     * which is what the air actually is.
+     *
+     * Only for the forecast. The measured drawing has three thermometers on a
+     * hillside, and smoothing between them would be drawing a resolution that
+     * was never there.
+     *
+     * @returns {string} SVG markup
+     */
+    renderStabilityField() {
+        const columns = this.model.columns;
+
+        const profiles = columns.map(column => {
+            const points = [...column.segments, column.above]
+                .filter(slab => slab && Number.isFinite(slab.rate))
+                .map(slab => ({elevation: (slab.from + slab.to) / 2, rate: slab.rate}))
+                .sort((a, b) => a.elevation - b.elevation);
+
+            return points.length ? points : null;
+        });
+
+        const paintTop = this.top;
+        const paintBottom = Math.min(this.bottom, this.y(this.model.ground));
+
+        const rows = Math.max(0, Math.ceil((paintBottom - paintTop) / FIELD_STEP.y));
+        const cells = Math.max(0, Math.ceil((this.right - this.left) / FIELD_STEP.x));
+
+        if (!rows || !cells) return '';
+
+        // One band index per cell, or -1 where the model said nothing. A typed
+        // array because this is a few hundred thousand cells on a wide screen
+        // and it is rebuilt on every resize.
+        const grid = new Int8Array(rows * cells).fill(-1);
+
+        // Heights are the same down every cell of the grid, so they are worked
+        // out once rather than once per column. Bottom row first, so the walk up
+        // each column is in ascending height.
+        const heights = Array.from({length: rows}, (unused, row) =>
+            this.metresAt(paintTop + (rows - 1 - row + 0.5) * FIELD_STEP.y));
+
+        // The band a rate falls in, looked up once per threshold rather than
+        // once per cell — a linear scan of nine entries, several hundred
+        // thousand times over, is most of the cost of the drawing otherwise.
+        const bandOf = rate => {
+            for (let i = 0; i < LAPSE.length; i++) if (rate <= LAPSE[i].max) return i;
+            return LAPSE.length - 1;
+        };
+
+        for (let cell = 0; cell < cells; cell++) {
+            const time = this.timeAt(this.left + (cell + 0.5) * FIELD_STEP.x);
+
+            let index = 0;
+            while (index < columns.length - 2 && columns[index + 1].time < time) index += 1;
+
+            const before = profiles[index];
+            const after = profiles[index + 1] ?? before;
+
+            // An hour the model lost is left uncoloured rather than bridged:
+            // the hatch underneath is what says nothing was forecast here.
+            if (!before || !after) continue;
+
+            const from = columns[index].time;
+            const to = columns[index + 1]?.time ?? from;
+            const share = to === from ? 0 : Math.min(1, Math.max(0, (time - from) / (to - from)));
+
+            // Walked upward with a moving index into each profile rather than
+            // searched per row, which is what makes a per-pixel field affordable.
+            let low = 0;
+            let high = 0;
+
+            for (let row = 0; row < rows; row++) {
+                const metres = heights[row];
+
+                while (low < before.length - 2 && before[low + 1].elevation < metres) low += 1;
+                while (high < after.length - 2 && after[high + 1].elevation < metres) high += 1;
+
+                const rate = (1 - share) * rateAtFrom(before, metres, low)
+                    + share * rateAtFrom(after, metres, high);
+
+                grid[(rows - 1 - row) * cells + cell] = bandOf(rate);
+            }
+        }
+
+        // Merged along each row before anything is written out, so a band that
+        // covers half the sky is a handful of rectangles rather than hundreds.
+        const runs = LAPSE.map(() => []);
+
+        for (let row = 0; row < rows; row++) {
+            let cell = 0;
+
+            while (cell < cells) {
+                const value = grid[row * cells + cell];
+
+                if (value < 0) { cell += 1; continue; }
+
+                let end = cell;
+                while (end + 1 < cells && grid[row * cells + end + 1] === value) end += 1;
+
+                const x = this.left + cell * FIELD_STEP.x;
+                // Half a pixel over, or antialiasing draws a pale seam between
+                // every pair of rows and runs.
+                const width = (end - cell + 1) * FIELD_STEP.x + 0.5;
+                const y = paintTop + row * FIELD_STEP.y;
+
+                runs[value].push(`M${x.toFixed(1)} ${y.toFixed(1)}h${width.toFixed(1)}v${
+                    FIELD_STEP.y + 0.5}h${(-width).toFixed(1)}z`);
+
+                cell = end + 1;
+            }
+        }
+
+        const bands = runs.map((shapes, index) => shapes.length
+            ? `<path fill="${LAPSE[index].color}" d="${shapes.join('')}"></path>`
+            : '').join('');
+
+        return `<g class="windgram-stability">${bands}</g>`;
     }
 
     /**
@@ -460,9 +724,8 @@ export class Windgram {
     renderIsotherms() {
         const lines = this.model.isotherms.map(isotherm => {
             const paths = isotherm.runs.map(run => {
-                const d = run.map((point, index) =>
-                    `${index ? 'L' : 'M'}${this.x(point.time).toFixed(1)} ${this.y(point.elevation).toFixed(1)}`
-                ).join('');
+                const d = this.path(run.map(point =>
+                    ({x: this.x(point.time), y: this.y(point.elevation)})));
 
                 return `<path class="windgram-isotherm" d="${d}"></path>`;
             }).join('');
@@ -508,8 +771,7 @@ export class Windgram {
 
         if (points.length < 2) return '';
 
-        const d = points.map((point, index) =>
-            `${index ? 'L' : 'M'}${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join('');
+        const d = this.path(points);
 
         // Roughly one glider every hundred pixels, so the line is readable as a
         // thermal top on a phone as well as on a desktop.
@@ -560,10 +822,8 @@ export class Windgram {
         if (run.length > 1) runs.push(run);
         if (!runs.length) return '';
 
-        const paths = runs.map(points => `<path class="windgram-climb-line" d="${
-            points.map((point, index) =>
-                `${index ? 'L' : 'M'}${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join('')
-        }"></path>`).join('');
+        const paths = runs.map(points =>
+            `<path class="windgram-climb-line" d="${this.path(points)}"></path>`).join('');
 
         return `<g class="windgram-climb">${paths}</g>`;
     }
@@ -579,10 +839,7 @@ export class Windgram {
 
         if (points.length < 2) return '';
 
-        const d = points.map((point, index) =>
-            `${index ? 'L' : 'M'}${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join('');
-
-        return `<path class="windgram-cloudbase" d="${d}"></path>`;
+        return `<path class="windgram-cloudbase" d="${this.path(points)}"></path>`;
     }
 
     /**
@@ -605,7 +862,7 @@ export class Windgram {
         const columns = this.model.columns;
         const perColumn = (this.right - this.left) / Math.max(columns.length, 1);
         const step = Math.max(1, Math.round(BARB_SPACING / Math.max(perColumn, 1)));
-        const lift = BARB_OFFSET_FEET * FEET;
+        const lift = this.barbOffsetFeet * FEET;
 
         const marks = [];
 
@@ -629,7 +886,9 @@ export class Windgram {
                     y: y.toFixed(1),
                     speed: level.windSpeed.toFixed(1),
                     point: level.windDir === null ? '' : pointAt(level.windDir).abbr,
-                    station: station?.shortName ?? station?.name ?? ''
+                    // A measured level belongs to a station and is named for it;
+                    // a modelled one is a pressure level and names itself.
+                    station: level.label ?? station?.shortName ?? station?.name ?? ''
                 };
 
                 // A calm has no direction worth pointing at, so it is marked
@@ -731,17 +990,23 @@ export class Windgram {
         // On a narrow screen, or early in the day when the drawing is only a
         // few hours wide, the labels are thinned rather than allowed to touch.
         const step = (this.right - this.left) / Math.max(hours, 1) < 34 ? 2 : 1;
-        const from = Math.ceil((dayStart - dayStart) / HOUR);
 
         let marks = '';
 
-        for (let hour = from; hour <= hours; hour += step) {
-            const x = this.x(dayStart + hour * HOUR);
+        for (let hour = 0; hour <= hours; hour += step) {
+            const at = dayStart + hour * HOUR;
+            const x = this.x(at);
+
+            // Read off the clock rather than counted from the left edge. The
+            // measured drawing starts at local midnight, where the two are the
+            // same number; the forecast starts at seven in the morning, where
+            // they are not.
+            const clock = Math.floor((at + (this.model.offset ?? 0)) / HOUR) % 24;
 
             marks += `<line class="windgram-hour-tick" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}"
                             y1="${this.bottom}" y2="${this.bottom + 4}"></line>
                       <text class="windgram-axis" x="${x.toFixed(1)}" y="${this.bottom + 17}"
-                            text-anchor="middle">${String(hour).padStart(2, '0')}</text>`;
+                            text-anchor="middle">${String(clock).padStart(2, '0')}</text>`;
         }
 
         return `<g class="windgram-hours">${marks}</g>`;
@@ -825,25 +1090,7 @@ export class Windgram {
      * @returns {string[]} The lines to print, in order
      */
     footnotes() {
-        const zone = this.model.offset === undefined
-            ? ''
-            : ` (UTC${this.model.offset > 0 ? '+' : '−'}${Math.abs(Math.round(this.model.offset / HOUR))})`;
-
-        const launch = this.model.launch?.shortName ?? 'launch';
-        const top = this.model.stations.at(-1)?.shortName ?? 'the top station';
-
-        // Air above the top station is either HRDPS or a continuation of the
-        // last measured gradient, and those deserve different amounts of trust.
-        const overhead = this.model.modelledAloft
-            ? `Air above ${top} is from the HRDPS model, not measured here`
-            : `Air above ${top} is extrapolated from the gradient below it`;
-
-        const sentences = [
-            `Local lapse rate in ºC per 1000 ft. Wind barbs in km/h. Time${zone}.`,
-            'Blue hatching is air within half a degree of its dew point; grey hatching is air no station was reporting from. Barbs sit 500 ft above their station so they clear its line.',
-            'The solid line is where a thermal stops climbing; the dashed line under it is where the climb drops below a glider\'s own sink, which is the height worth flying to.',
-            `* Shade is measured — how much of the clear-sky sunlight is missing to cloud, haze, smoke or terrain. Cloud is modelled. Lift is worked out from the measured sunlight and profile, with thermals released from ${launch}. ${overhead}.`
-        ];
+        const sentences = this.sentences(this.model, this.zone());
 
         // Wrapped on a character estimate rather than on measured text: the
         // notes are set in one size in one font, and re-measuring every line
@@ -869,6 +1116,49 @@ export class Windgram {
         });
 
         return lines;
+    }
+
+    /**
+     * How the drawing names the clock its hours are on.
+     * @returns {string} A parenthesised offset, or nothing when there is none
+     */
+    zone() {
+        const {offset} = this.model;
+
+        if (offset === undefined || offset === null) return '';
+
+        return ` (UTC${offset > 0 ? '+' : '−'}${Math.abs(Math.round(offset / HOUR))})`;
+    }
+
+    /**
+     * The footnotes for the day that has already happened.
+     *
+     * Every one of these is load-bearing rather than decorative: two of the four
+     * strips are derived rather than measured, the air above the top station is
+     * a continuation of one gradient, and the thermals start from launch rather
+     * than from the valley. A reader who does not know that will over-trust the
+     * chart.
+     *
+     * @param {Object} model - The model being drawn
+     * @param {string} zone - The clock the hours are on
+     * @returns {string[]} The sentences to print, in order
+     */
+    measuredFootnotes(model, zone) {
+        const launch = model.launch?.shortName ?? 'launch';
+        const top = model.stations.at(-1)?.shortName ?? 'the top station';
+
+        // Air above the top station is either HRDPS or a continuation of the
+        // last measured gradient, and those deserve different amounts of trust.
+        const overhead = model.modelledAloft
+            ? `Air above ${top} is from the HRDPS model, not measured here`
+            : `Air above ${top} is extrapolated from the gradient below it`;
+
+        return [
+            `Local lapse rate in ºC per 1000 ft. Wind barbs in km/h. Time${zone}.`,
+            'Blue hatching is air within half a degree of its dew point; grey hatching is air no station was reporting from. Barbs sit 500 ft above their station so they clear its line.',
+            'The solid line is where a thermal stops climbing; the dashed line under it is where the climb drops below a glider\'s own sink, which is the height worth flying to.',
+            `* Shade is measured — how much of the clear-sky sunlight is missing to cloud, haze, smoke or terrain. Cloud is modelled. Lift is worked out from the measured sunlight and profile, with thermals released from ${launch}. ${overhead}.`
+        ];
     }
 
     /**

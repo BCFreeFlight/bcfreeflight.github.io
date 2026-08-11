@@ -152,6 +152,89 @@ export const STRIPS = [
     }
 ];
 
+/**
+ * One column of the forecast drawing. The model publishes hourly and there is
+ * nothing to average, so a column is an hour and no interpolation is invented
+ * between them.
+ */
+export const FORECAST_COLUMN_MS = 60 * 60 * 1000;
+
+/**
+ * How high the forecast goes, in metres above sea level.
+ *
+ * Higher than the measured drawing, because it can be: the profile is modelled
+ * all the way up rather than extrapolated from the top station, so height costs
+ * nothing in confidence. This sits just under the 600 hPa level, which is the
+ * top of what is asked for and lands around 4,350 m over the Okanagan.
+ */
+export const FORECAST_CEILING = 4200;
+
+/**
+ * The flying day, in hours on the site's own clock.
+ *
+ * The RASP's own window. A forecast drawn from midnight to midnight spends most
+ * of its width on hours nobody is asking about, and squeezes the six that
+ * matter into a third of the panel.
+ */
+export const FORECAST_WINDOW = {startHour: 7, endHour: 21};
+
+/**
+ * The strips above the forecast panel.
+ *
+ * The RASP's own four, in the RASP's own order. There is no shade row: shade is
+ * measured against a pyranometer, and a forecast has nothing to measure. The
+ * thresholds are the RASP's too — it will not draw a lift row for a day that
+ * never gets going, or a rain row for a trace.
+ *
+ * @type {Object[]}
+ */
+export const FORECAST_STRIPS = [
+    {
+        key: 'pressure',
+        label: 'pres.',
+        unit: 'kPa',
+        colour: colour('strip-pressure'),
+        digits: 1,
+        zeroed: false,
+        nice: 0.4,
+        read: column => column.pressure
+    },
+    {
+        key: 'lift',
+        label: 'Lift',
+        unit: 'm/s',
+        colour: colour('strip-lift'),
+        digits: 1,
+        zeroed: true,
+        nice: 1,
+        // A fifth of a metre a second is the RASP's own floor for admitting
+        // there is any lift to speak of.
+        threshold: 0.2,
+        read: column => column.lift
+    },
+    {
+        key: 'cloud',
+        label: 'Cloud',
+        unit: '%',
+        colour: colour('series-cloud'),
+        digits: 0,
+        zeroed: true,
+        fixed: [0, 100],
+        read: column => column.cloud
+    },
+    {
+        key: 'rain',
+        label: 'Rain',
+        unit: 'mm/hr',
+        colour: colour('strip-rain'),
+        digits: 2,
+        zeroed: true,
+        nice: 1,
+        threshold: 0.02,
+        read: column => column.rain
+    }
+];
+
 /** Isotherms are drawn every this many degrees, the way the RASP does. */
 export const ISOTHERM_STEP = 5;
 

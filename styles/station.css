@@ -939,6 +939,24 @@ a { color: var(--accent); }
     touch-action: pan-y;
 }
 
+/* The forecast sits in a card of its own rather than as another view of the
+   day that has happened, because the difference between a reading and a
+   forecast is the most important thing about either. Same frame as the trend
+   card above it, so the two read as a pair rather than as a stray panel. */
+.forecast {
+    margin-top: .75rem;
+    padding: 1rem 1.1rem 1.1rem;
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    background: var(--surface);
+}
+
+.forecast-host {
+    position: relative;
+    margin-top: .9rem;
+    touch-action: pan-y;
+}
+
 .windgram-svg { display: block; width: 100%; height: auto; overflow: visible; }
 
 .windgram-bed { fill: #f8fafc; }

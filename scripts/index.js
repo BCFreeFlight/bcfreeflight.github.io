@@ -4,6 +4,7 @@ import air from './air.js';
 import sites from './sites.js';
 import youtube from './youtube.js';
 import trends from './trends.js';
+import forecastPanel from './forecast-panel.js';
 import * as readings from './readings.js';
 import {READOUTS} from './config/readouts.js';
 import {CAMERA_CHECK_MS, RETRY_MS} from './config/defaults.js';
@@ -262,6 +263,7 @@ export class Index {
                     entry.station.coordinates)}
                 ${this.renderReadouts(entry.observation, entry.metrics, entry.air)}
                 ${trends.render(entry.station)}
+                ${entry.station.isDefault ? forecastPanel.render(entry.station) : ''}
             </div>`;
     }
 
@@ -435,6 +437,7 @@ export class Index {
         // A chart cannot size itself inside a hidden panel, so it is told the
         // moment its panel is on screen.
         trends.reveal(key);
+        forecastPanel.reveal(key);
     }
 
     /**
@@ -691,6 +694,10 @@ export class Index {
                     // Before the tabs, so the panel revealed by activateView
                     // already has a chart to size.
                     trends.mount(enabled);
+
+                    // Only the launch carries one: every station on the
+                    // hillside sits in the same forecast square.
+                    forecastPanel.mount(enabled.find(entry => entry.station.isDefault));
 
                     const lookup = Object.fromEntries(enabled.map(entry => [entry.station.key, entry]));
                     this.bindTabs(enabled, lookup, selected);

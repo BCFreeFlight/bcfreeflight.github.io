@@ -3,7 +3,7 @@ import {LAPSE} from './config/bands.js';
 import {band, isNumber} from './lib/numbers.js';
 import {lapseRate, MINIMUM_GAP} from './lib/lapse.js';
 import {sunHeight, clearSky, shadeFraction} from './lib/solar.js';
-import {temperatureAt, thermalTop, updraft, heatFlux, climbTop} from './lib/thermal.js';
+import {temperatureAt, thermalTop, updraft, heatFlux, climbTop, LCL_PER_DEGREE} from './lib/thermal.js';
 import sounding from './sounding.js';
 
 /**
@@ -26,11 +26,6 @@ export const FEET = 0.3048;
 // enough that a cloud band lands on the right side of a station, coarse enough
 // that a day of columns is still a few thousand samples.
 const SAMPLE_STEP = 60;
-
-// Roughly how far a parcel has to rise before it reaches its dew point, per
-// degree of spread between temperature and dew point. The standard field
-// approximation, and accurate to a few percent over the range that matters.
-const LCL_PER_DEGREE = 125;
 
 /**
  * Over how long the temperature is averaged before the air between two stations
@@ -193,7 +188,7 @@ function columnise(day, dayStart, count) {
  * @param {Object} upper - The level above
  * @returns {?Object} rate and the band it falls in, or null for a zero gap
  */
-function slab(lower, upper) {
+export function slab(lower, upper) {
     const gap = (upper.elevationFeet - lower.elevationFeet) / 1000;
     if (Math.abs(gap) < MINIMUM_GAP) return null;
 
@@ -263,7 +258,7 @@ function heightAtTemperature(levels, value, ceiling) {
  * @param {number} top - The highest station, in metres
  * @returns {Object[]} Bands of {from, to}, in metres
  */
-function cloudBands(levels, ground, top) {
+export function cloudBands(levels, ground, top) {
     const damp = levels.filter(level => isNumber(level.dewpt));
     if (damp.length < 2) return [];
 
@@ -518,7 +513,7 @@ export function buildWindgram(entries, modelled = null) {
  * @param {number} ceiling - The top of the drawing, in metres
  * @returns {Object[]} One {value, runs} per contour
  */
-function isotherms(columns, ceiling) {
+export function isotherms(columns, ceiling) {
     const temps = columns.flatMap(column => (column.profile ?? column.levels).map(level => level.temp));
     if (temps.length < 2) return [];
 

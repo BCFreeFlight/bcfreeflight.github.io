@@ -469,17 +469,26 @@ describe('turning sunlight into heat', () => {
 
 describe('the height a wing can still climb to', () => {
     it('sits above the strongest part of the thermal and below the top', () => {
-        const top = climbTop(3000, 300, 3);
+        const top = climbTop(3000, 300, 0.8);
         const depth = 3000 - 300;
 
-        // The profile peaks around a quarter of the way up and dies out at
-        // nine tenths, so the answer has to be between them.
-        ok(top > 300 + 0.25 * depth, `${top} should be above the peak`);
-        ok(top < 300 + 0.91 * depth, `${top} should be below where the climb dies out`);
+        // The profile peaks a third of the way up and is still going at the top
+        // of the layer, so a wing runs out of climb somewhere between them.
+        ok(top > 300 + 0.3125 * depth, `${top} should be above the peak`);
+        ok(top < 3000, `${top} should be below the top of the layer`);
     });
 
     it('is higher on a stronger day', () => {
-        ok(climbTop(3000, 300, 4) > climbTop(3000, 300, 1.5));
+        ok(climbTop(3000, 300, 0.8) > climbTop(3000, 300, 0.6));
+    });
+
+    it('reaches the top of the layer when the whole of it beats the wing', () => {
+        // The climb only falls to 0.8 of the layer mean at the very top, so any
+        // day with a mean much past a metre a second is climbable all the way —
+        // and it is then cloudbase, not the air, that ends the climb.
+        // Within the search tolerance of the top, which is as close as a
+        // bisection gets to an answer sitting on the edge of its range.
+        close(climbTop(3000, 300, 3), 3000, 10);
     });
 
     it('is nothing when the air never beats the glider', () => {
@@ -492,15 +501,15 @@ describe('the height a wing can still climb to', () => {
     });
 
     it('gives way to a heavier wing', () => {
-        const light = climbTop(3000, 300, 3, {sink: 0.8});
-        const heavy = climbTop(3000, 300, 3, {sink: 1.5});
+        const light = climbTop(3000, 300, 0.8, {sink: 0.8});
+        const heavy = climbTop(3000, 300, 0.8, {sink: 1.5});
 
         ok(heavy < light, 'a faster sink rate runs out of climb lower down');
     });
 
     it('uses the same sink rate the Canadian RASP does', () => {
         equal(GLIDER_SINK, 1.0);
-        equal(climbTop(3000, 300, 3), climbTop(3000, 300, 3, {sink: GLIDER_SINK}));
+        equal(climbTop(3000, 300, 0.8), climbTop(3000, 300, 0.8, {sink: GLIDER_SINK}));
     });
 });
 
@@ -966,8 +975,9 @@ describe('how high a wing actually climbs', () => {
     });
 
     it('is nothing at all on a day that never climbs faster than a glider sinks', () => {
-        // Barely any sun, so the layer mean never beats the wing.
-        const weak = buildWindgram(profile({temp: 30, solar: 70}, {temp: 10}), sky({share: 0.03}));
+        // Barely any sun, and almost none of it becoming heat, so the layer mean
+        // never gets anywhere near the wing.
+        const weak = buildWindgram(profile({temp: 30, solar: 70}, {temp: 10}), sky({share: 0.01}));
         equal(midday(weak).climbTop, null);
     });
 
