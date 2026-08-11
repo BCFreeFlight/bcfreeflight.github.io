@@ -39,10 +39,40 @@ export const COLUMN_MS = 30 * 60 * 1000;
 export const CEILING = 3000;
 
 /**
- * A little air under the lowest station, so its barbs and the terrain below it
- * are not jammed against the axis.
+ * How far under the lowest station the drawing starts, in feet.
+ *
+ * Enough that its barbs and the terrain beneath it are not jammed against the
+ * axis, and no more: everything below the lowest thermometer is ground.
  */
-export const GROUND_MARGIN = 60;
+export const FLOOR_BELOW_FEET = 200;
+
+/**
+ * How far above the highest thermal the drawing stops, in feet.
+ *
+ * The top of the lift is the thing every windgram is really being read for, so
+ * the frame is built around it rather than around a fixed altitude. A thousand
+ * feet of air above it is enough to see that the climb has stopped and what is
+ * capping it, without spending half the panel on sky nobody is flying in.
+ */
+export const CEILING_ABOVE_FEET = 1000;
+
+/**
+ * The ceiling the first pass uses, in metres.
+ *
+ * The measured drawing's parcel calculation stops looking at the ceiling and
+ * reports the ceiling when a parcel is buoyant the whole way up — so a chart
+ * drawn to a low ceiling reports its own ceiling back as the thermal top, and a
+ * frame built from that would never grow. The first pass is therefore drawn to a
+ * height nothing will reach, purely so the second pass has honest tops to size
+ * itself from.
+ */
+export const DRAFT_CEILING = 6000;
+
+/**
+ * The shortest drawing worth making, in metres above the floor. A winter
+ * morning with no lift anywhere still needs a panel with some air in it.
+ */
+export const MINIMUM_DEPTH = 1500;
 
 /** Geometry, in pixels. */
 export const LAYOUT = {

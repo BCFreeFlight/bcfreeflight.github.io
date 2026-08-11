@@ -6,9 +6,9 @@ import {STORAGE_KEYS} from './config/defaults.js';
 import {readJson, writeJson} from './lib/storage.js';
 import {Chart} from './chart.js';
 import {Windgram} from './windgram.js';
-import {buildWindgram} from './rasp.js';
+import {buildWindgram, sharedFrame, FEET} from './rasp.js';
 import {buildForecastWindgram} from './rasp-model.js';
-import {FORECAST_VIEW} from './config/rasp.js';
+import {FORECAST_VIEW, DRAFT_CEILING} from './config/rasp.js';
 import forecast from './forecast.js';
 import {lapsePairs, lapseColumn} from './lapse-series.js';
 import {airColumn} from './air-series.js';
@@ -53,6 +53,7 @@ export class Trends {
         this.aloft = new Map();
         this.pairs = [];
         this.forecasts = null;
+        this.forecast = null;
         this.selected = readJson(STORAGE_KEYS.trendSeries, null);
         this.mode = readJson(STORAGE_KEYS.trendMode, 'split');
         this.day = this.knownDay(readJson(STORAGE_KEYS.windgramDay, null));
@@ -217,25 +218,34 @@ export class Trends {
     async loadDays() {
         const panels = [...this.panels.values()];
 
-        await Promise.all(panels.map(async panel => {
-            try {
-                const day = await history.load(panel.station.id);
-                if (day) this.days.set(panel.station.key, day);
-            } catch (error) {
-                console.error(`Could not read the day for ${panel.station.id}:`, error);
-            }
+        await Promise.all([
+            ...panels.map(async panel => {
+                try {
+                    const day = await history.load(panel.station.id);
+                    if (day) this.days.set(panel.station.key, day);
+                } catch (error) {
+                    console.error(`Could not read the day for ${panel.station.id}:`, error);
+                }
 
-            // Beside the day rather than inside it, because it is not the
-            // station's reading: the panel already knows where it stands, and
-            // panels in the same grid square share the one request.
-            const overhead = await air.load(panel.latitude, panel.longitude);
-            if (overhead) this.airs.set(panel.station.key, overhead);
+                // Beside the day rather than inside it, because it is not the
+                // station's reading: the panel already knows where it stands,
+                // and panels in the same grid square share the one request.
+                const overhead = await air.load(panel.latitude, panel.longitude);
+                if (overhead) this.airs.set(panel.station.key, overhead);
 
-            // The air above the top of the hill, which no station is standing
-            // in. Only the windgram uses it, and only above the last station.
-            const modelled = await sounding.load(panel.latitude, panel.longitude);
-            if (modelled) this.aloft.set(panel.station.key, modelled);
-        }));
+                // The air above the top of the hill, which no station is
+                // standing in. Only the windgram uses it, and only above the
+                // last station.
+                const modelled = await sounding.load(panel.latitude, panel.longitude);
+                if (modelled) this.aloft.set(panel.station.key, modelled);
+            }),
+            // Read alongside the rest rather than after them. The three
+            // drawings share one frame, and the frame is built from the highest
+            // thermal any of them has — so the forecast has to be in hand
+            // before the first of them can be drawn, or the measured chart
+            // would be drawn once and then jump to a new axis a moment later.
+            this.loadForecast(panels)
+        ]);
 
         this.pairs = lapsePairs(panels.map(panel => ({
             station: panel.station,
@@ -251,20 +261,72 @@ export class Trends {
         // the same square the drawing releases its thermals in.
         const launch = panels.find(panel => panel.station.isDefault) ?? panels[0];
 
-        this.windgram = buildWindgram(panels.map(panel => ({
+        this.charted = panels.map(panel => ({
             station: panel.station,
             elevationFeet: panel.elevation,
             latitude: panel.latitude,
             longitude: panel.longitude,
             day: this.days.get(panel.station.key)
-        })), launch ? this.aloft.get(launch.station.key) ?? null : null);
+        }));
 
+        this.aloftAtLaunch = launch ? this.aloft.get(launch.station.key) ?? null : null;
+
+        this.rebuild();
         this.panels.forEach(panel => this.apply(panel));
+    }
 
-        // Deliberately not awaited. The measured drawing is the one most
-        // readers want and it is ready now; the forecast is a second pair of
-        // requests and it can fill in behind them.
-        this.loadForecast();
+    /**
+     * Draws every windgram once to find out how high the day goes, then draws
+     * them all again in the frame that answer implies.
+     *
+     * Two passes rather than one, because the frame cannot be known before the
+     * drawings and the drawings cannot be made without a frame. The first pass
+     * is thrown away: it exists only to report the thermal tops, and it is drawn
+     * to a ceiling nothing reaches so that none of them come back clipped.
+     *
+     * Both passes are arithmetic over sixty columns and neither asks anything of
+     * the network — every reading and both halves of the forecast are already in
+     * hand by the time this runs.
+     *
+     * @returns {void}
+     */
+    rebuild() {
+        if (!this.charted?.length) return;
+
+        const lowest = Math.min(...this.charted
+            .filter(entry => Number.isFinite(entry.elevationFeet))
+            .map(entry => entry.elevationFeet * FEET));
+
+        const draft = this.build({floor: lowest, ceiling: DRAFT_CEILING});
+
+        Object.assign(this, this.build(sharedFrame(this.drawings(draft), lowest)));
+    }
+
+    /**
+     * The three drawings of one build, as a list.
+     * @param {Object} built - windgram and forecasts
+     * @returns {Array<?Object>} The models, in the order the pills offer them
+     */
+    drawings({windgram, forecasts}) {
+        return [windgram, forecasts?.today, forecasts?.tomorrow];
+    }
+
+    /**
+     * Every windgram on the panel, drawn in one frame.
+     * @param {Object} frame - The floor and ceiling they share
+     * @returns {Object} windgram and forecasts
+     */
+    build(frame) {
+        const windgram = buildWindgram(this.charted, this.aloftAtLaunch, frame);
+
+        const forecasts = this.forecast
+            ? {
+                today: buildForecastWindgram(this.forecast, {...this.where, day: 0, frame}),
+                tomorrow: buildForecastWindgram(this.forecast, {...this.where, day: 1, frame})
+            }
+            : null;
+
+        return {windgram, forecasts};
     }
 
     /**
@@ -277,22 +339,18 @@ export class Trends {
      *
      * @returns {Promise<void>}
      */
-    async loadForecast() {
-        const panel = [...this.panels.values()].find(entry => entry.forecast);
+    async loadForecast(panels) {
+        const panel = panels.find(entry => entry.forecast);
         if (!panel) return;
 
         const named = panel.station.coordinates;
-        const latitude = named?.latitude ?? panel.latitude;
-        const longitude = named?.longitude ?? panel.longitude;
 
-        const read = await forecast.load(latitude, longitude);
-
-        this.forecasts = {
-            today: buildForecastWindgram(read, {day: 0, latitude, longitude}),
-            tomorrow: buildForecastWindgram(read, {day: 1, latitude, longitude})
+        this.where = {
+            latitude: named?.latitude ?? panel.latitude,
+            longitude: named?.longitude ?? panel.longitude
         };
 
-        this.panels.forEach(entry => this.apply(entry));
+        this.forecast = await forecast.load(this.where.latitude, this.where.longitude);
     }
 
     /**

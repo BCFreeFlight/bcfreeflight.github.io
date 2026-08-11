@@ -1,4 +1,7 @@
-import {COLUMN_MS, CEILING, GROUND_MARGIN, ISOTHERM_STEP, CLOUD_DEPRESSION} from './config/rasp.js';
+import {
+    COLUMN_MS, CEILING, ISOTHERM_STEP, CLOUD_DEPRESSION,
+    FLOOR_BELOW_FEET, CEILING_ABOVE_FEET, MINIMUM_DEPTH
+} from './config/rasp.js';
 import {LAPSE} from './config/bands.js';
 import {band, isNumber} from './lib/numbers.js';
 import {lapseRate, MINIMUM_GAP} from './lib/lapse.js';
@@ -288,13 +291,48 @@ export function cloudBands(levels, ground, top) {
 }
 
 /**
+ * The frame every windgram on the panel is drawn in.
+ *
+ * The measured day and the two forecasts were each sizing themselves to their
+ * own contents, which made them impossible to read against one another: the
+ * same thermal top landed at a different height in each, and the measured
+ * drawing's fixed ceiling quietly clipped its own answer. One frame, built from
+ * all of them, fixes both.
+ *
+ * @param {Array<?Object>} models - The drawings that will share the frame
+ * @param {number} lowest - The lowest station's elevation, in metres
+ * @returns {Object} floor and ceiling, in metres above sea level
+ */
+export function sharedFrame(models, lowest) {
+    const floor = lowest - FLOOR_BELOW_FEET * FEET;
+
+    // The top of the lift, across every drawing that will share this frame.
+    // Taken from all of them together so that switching between the day so far
+    // and the two forecasts moves the weather and not the axis: a climb that is
+    // higher tomorrow should look higher, not fill the same panel.
+    const tops = models
+        .filter(Boolean)
+        .flatMap(model => model.columns.map(column => column.thermalTop))
+        .filter(isNumber);
+
+    const ceiling = tops.length
+        ? Math.max(...tops) + CEILING_ABOVE_FEET * FEET
+        : floor + MINIMUM_DEPTH;
+
+    return {floor, ceiling: Math.max(ceiling, floor + MINIMUM_DEPTH)};
+}
+
+/**
  * Builds the whole drawing's model from the days already read for each station.
  *
  * @param {Object[]} entries - {station, elevationFeet, latitude, longitude, day}
  * @param {?Object} [modelled] - The modelled air above the stations, when it is known
+ * @param {?Object} [frame] - The floor and ceiling shared with the other
+ *     drawings. Left out, the drawing sizes itself to its own stations, which
+ *     is right for a windgram that is the only one on the page.
  * @returns {?Object} The model, or null when there is nothing to draw
  */
-export function buildWindgram(entries, modelled = null) {
+export function buildWindgram(entries, modelled = null, frame = null) {
     const charted = entries
         .filter(entry => entry.day?.times?.length && Number.isFinite(entry.elevationFeet))
         .sort((a, b) => a.elevationFeet - b.elevationFeet);
@@ -328,8 +366,11 @@ export function buildWindgram(entries, modelled = null) {
     const pressures = barometer?.readings ? aggregated[barometer.index] : null;
 
     const ground = charted[0].elevationFeet * FEET;
-    const floor = ground - GROUND_MARGIN;
-    const ceiling = Math.max(CEILING, charted.at(-1).elevationFeet * FEET + 500);
+
+    const {floor, ceiling} = frame ?? {
+        floor: ground - FLOOR_BELOW_FEET * FEET,
+        ceiling: Math.max(CEILING, charted.at(-1).elevationFeet * FEET + 500)
+    };
 
     // Solar position is worked out at the lowest station: the three are within
     // ten kilometres of each other, which is a rounding error at this scale.

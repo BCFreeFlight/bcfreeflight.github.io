@@ -2,6 +2,7 @@ import {describe, it, equal, ok, close, fixture, withFetch, response} from './ru
 import api, {RaspApi, FORECAST_LEVELS} from '../scripts/rasp-api.js';
 import {Forecast} from '../scripts/forecast.js';
 import {buildForecastWindgram} from '../scripts/rasp-model.js';
+import {sharedFrame, FEET} from '../scripts/rasp.js';
 import {Windgram} from '../scripts/windgram.js';
 import {FORECAST_STRIPS, FORECAST_CEILING, FORECAST_WINDOW, LAYOUT} from '../scripts/config/rasp.js';
 import {
@@ -477,6 +478,87 @@ describe('building a forecast day', () => {
             const span = [bases[index], bases[index + 2]].sort((a, b) => a - b);
             ok(value >= Math.min(span[0], value) && value <= Math.max(span[1], value));
         });
+    });
+});
+
+describe('the frame the three drawings share', () => {
+    /**
+     * A stand-in drawing with one thermal top in it.
+     * @param {?number} top - The top of the lift, in metres
+     * @returns {Object} Something `sharedFrame` can read
+     */
+    function drawing(top) {
+        return {columns: [{thermalTop: null}, {thermalTop: top}, {thermalTop: null}]};
+    }
+
+    it('starts two hundred feet under the lowest station', () => {
+        const {floor} = sharedFrame([drawing(2000)], 495);
+
+        close(floor, 495 - 200 * FEET, 0.001);
+    });
+
+    it('stops a thousand feet over the highest thermal of the three', () => {
+        // The example that matters: the tallest day sets the ceiling, and the
+        // other two are drawn in it rather than each in their own.
+        const {ceiling} = sharedFrame([drawing(3000), drawing(3100), drawing(2100)], 495);
+
+        close(ceiling, 3100 + 1000 * FEET, 0.001);
+    });
+
+    it('is the same frame whichever of them is showing', () => {
+        const models = [drawing(3000), drawing(3100), drawing(2100)];
+        const frame = sharedFrame(models, 495);
+
+        // The point of the exercise: a climb that is higher tomorrow should
+        // look higher, rather than filling the same panel.
+        equal(sharedFrame([models[0]], 495).ceiling === frame.ceiling, false,
+            'sized alone, the measured day would stop lower');
+    });
+
+    it('ignores a day the model never answered for', () => {
+        const {ceiling} = sharedFrame([drawing(3100), null, undefined], 495);
+
+        close(ceiling, 3100 + 1000 * FEET, 0.001);
+    });
+
+    it('still has air in it on a day with no lift at all', () => {
+        const {floor, ceiling} = sharedFrame([drawing(null)], 495);
+
+        ok(ceiling - floor >= 1500, `${ceiling - floor} m of sky`);
+    });
+
+    it('sizes the real drawings to one frame', async () => {
+        const shaped = await read();
+        const where = {latitude: COOPERS.lat, longitude: COOPERS.lon};
+
+        const draft = [0, 1].map(day => buildForecastWindgram(shaped, {...where, day}));
+        const frame = sharedFrame(draft, 495);
+
+        const framed = [0, 1].map(day => buildForecastWindgram(shaped, {...where, day, frame}));
+
+        framed.forEach(built => {
+            equal(built.ceiling, frame.ceiling);
+            equal(built.floor, frame.floor);
+        });
+
+        // The ground each drawing sits on is its own — the forecast's terrain is
+        // the model's, and it is well above the valley station the floor is
+        // measured from.
+        ok(framed[0].ground > frame.floor, 'the launch stands above the floor');
+    });
+
+    it('is never clipped by the ceiling it produced', async () => {
+        const shaped = await read();
+        const where = {latitude: COOPERS.lat, longitude: COOPERS.lon};
+
+        const draft = [0, 1].map(day => buildForecastWindgram(shaped, {...where, day}));
+        const frame = sharedFrame(draft, 495);
+
+        [0, 1].map(day => buildForecastWindgram(shaped, {...where, day, frame}))
+            .flatMap(built => built.columns)
+            .filter(column => column.thermalTop !== null)
+            .forEach(column => ok(column.thermalTop < frame.ceiling,
+                `${column.thermalTop} should sit under ${frame.ceiling}`));
     });
 });
 

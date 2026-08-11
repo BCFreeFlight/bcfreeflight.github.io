@@ -1,4 +1,6 @@
-import {FORECAST_CEILING, FORECAST_COLUMN_MS, FORECAST_WINDOW, GROUND_MARGIN} from './config/rasp.js';
+import {
+    FORECAST_CEILING, FORECAST_COLUMN_MS, FORECAST_WINDOW, FLOOR_BELOW_FEET
+} from './config/rasp.js';
 import {isNumber} from './lib/numbers.js';
 import {binomial} from './lib/smooth.js';
 import {FEET, slab, cloudBands, isotherms} from './rasp.js';
@@ -166,10 +168,11 @@ function buildColumn(forecast, index, ground, ceiling) {
  * Builds one forecast day's drawing.
  *
  * @param {?Object} forecast - A shaped forecast from `forecast.js`
- * @param {Object} [options] - which day, and where the sun is worked out for
+ * @param {Object} [options] - which day, where the sun is worked out for, and the
+ *     floor and ceiling shared with the other drawings
  * @returns {?Object} A model the windgram can draw, or null when the day is empty
  */
-export function buildForecastWindgram(forecast, {day = 0, latitude, longitude} = {}) {
+export function buildForecastWindgram(forecast, {day = 0, latitude, longitude, frame} = {}) {
     if (!forecast?.times?.length || !isNumber(forecast.elevation)) return null;
     if (!forecast.levels?.length) return null;
 
@@ -186,7 +189,11 @@ export function buildForecastWindgram(forecast, {day = 0, latitude, longitude} =
     if (!hours.length) return null;
 
     const ground = forecast.elevation;
-    const ceiling = FORECAST_CEILING;
+
+    const {floor, ceiling} = frame ?? {
+        floor: ground - FLOOR_BELOW_FEET * FEET,
+        ceiling: FORECAST_CEILING
+    };
 
     const columns = hours.map(hour => buildColumn(forecast, hour.index, ground, ceiling));
 
@@ -254,7 +261,7 @@ export function buildForecastWindgram(forecast, {day = 0, latitude, longitude} =
     return {
         dayStart,
         lastTime,
-        floor: ground - GROUND_MARGIN,
+        floor,
         ground,
         ceiling,
         offset: forecast.offset,
