@@ -39,10 +39,40 @@ export const COLUMN_MS = 30 * 60 * 1000;
 export const CEILING = 3000;
 
 /**
- * A little air under the lowest station, so its barbs and the terrain below it
- * are not jammed against the axis.
+ * How far under the lowest station the drawing starts, in feet.
+ *
+ * Enough that its barbs and the terrain beneath it are not jammed against the
+ * axis, and no more: everything below the lowest thermometer is ground.
  */
-export const GROUND_MARGIN = 60;
+export const FLOOR_BELOW_FEET = 200;
+
+/**
+ * How far above the highest thermal the drawing stops, in feet.
+ *
+ * The top of the lift is the thing every windgram is really being read for, so
+ * the frame is built around it rather than around a fixed altitude. A thousand
+ * feet of air above it is enough to see that the climb has stopped and what is
+ * capping it, without spending half the panel on sky nobody is flying in.
+ */
+export const CEILING_ABOVE_FEET = 1000;
+
+/**
+ * The ceiling the first pass uses, in metres.
+ *
+ * The measured drawing's parcel calculation stops looking at the ceiling and
+ * reports the ceiling when a parcel is buoyant the whole way up — so a chart
+ * drawn to a low ceiling reports its own ceiling back as the thermal top, and a
+ * frame built from that would never grow. The first pass is therefore drawn to a
+ * height nothing will reach, purely so the second pass has honest tops to size
+ * itself from.
+ */
+export const DRAFT_CEILING = 6000;
+
+/**
+ * The shortest drawing worth making, in metres above the floor. A winter
+ * morning with no lift anywhere still needs a panel with some air in it.
+ */
+export const MINIMUM_DEPTH = 1500;
 
 /** Geometry, in pixels. */
 export const LAYOUT = {
@@ -105,6 +135,8 @@ export const STRIPS = [
         zeroed: true,
         nice: 1,
         estimated: true,
+        // The RASP's own floor for admitting there is any lift to speak of.
+        threshold: 0.2,
         read: column => column.lift
     },
     {
@@ -148,9 +180,136 @@ export const STRIPS = [
         digits: 2,
         zeroed: true,
         nice: 1,
+        threshold: 0.02,
         read: column => column.rain
     }
 ];
+
+/**
+ * One column of the forecast drawing. The model publishes hourly and there is
+ * nothing to average, so a column is an hour and no interpolation is invented
+ * between them.
+ */
+export const FORECAST_COLUMN_MS = 60 * 60 * 1000;
+
+/**
+ * How high the forecast goes, in metres above sea level.
+ *
+ * Higher than the measured drawing, because it can be: the profile is modelled
+ * all the way up rather than extrapolated from the top station, so height costs
+ * nothing in confidence. This sits just under the 600 hPa level, which is the
+ * top of what is asked for and lands around 4,350 m over the Okanagan.
+ */
+export const FORECAST_CEILING = 4200;
+
+/**
+ * How far either side of the sun the drawings run.
+ *
+ * An hour before it comes up and an hour after it goes down: enough to see the
+ * inversion break in the morning and the day shut down in the evening, and
+ * nothing beyond that, because a windgram drawn from midnight to midnight
+ * spends most of its width on hours nobody is asking about.
+ */
+export const SUN_MARGIN_MS = 60 * 60 * 1000;
+
+/** Both ends land on a half hour, so the axis reads in round numbers. */
+export const WINDOW_STEP_MS = 30 * 60 * 1000;
+
+/**
+ * The window to fall back on inside the arctic circle, in hours on the site's
+ * own clock, where there may be no sunrise to measure from.
+ */
+export const FORECAST_WINDOW = {startHour: 5, endHour: 22};
+
+/**
+ * The strips above the forecast panel.
+ *
+ * The RASP's own four, in the RASP's own order. There is no shade row: shade is
+ * measured against a pyranometer, and a forecast has nothing to measure. The
+ * thresholds are the RASP's too — it will not draw a lift row for a day that
+ * never gets going, or a rain row for a trace.
+ *
+ * @type {Object[]}
+ */
+export const FORECAST_STRIPS = [
+    {
+        key: 'pressure',
+        label: 'pres.',
+        unit: 'kPa',
+        colour: colour('strip-pressure'),
+        digits: 1,
+        zeroed: false,
+        nice: 0.4,
+        read: column => column.pressure
+    },
+    {
+        key: 'lift',
+        label: 'Lift',
+        unit: 'm/s',
+        colour: colour('strip-lift'),
+        digits: 1,
+        zeroed: true,
+        nice: 1,
+        // A fifth of a metre a second is the RASP's own floor for admitting
+        // there is any lift to speak of.
+        threshold: 0.2,
+        read: column => column.lift
+    },
+    {
+        key: 'cloud',
+        label: 'Cloud',
+        unit: '%',
+        colour: colour('series-cloud'),
+        digits: 0,
+        zeroed: true,
+        fixed: [0, 100],
+        read: column => column.cloud
+    },
+    {
+        key: 'rain',
+        label: 'Rain',
+        unit: 'mm/hr',
+        colour: colour('strip-rain'),
+        digits: 2,
+        zeroed: true,
+        nice: 1,
+        threshold: 0.02,
+        read: column => column.rain
+    }
+];
+
+/**
+ * What the forecast has to admit about itself.
+ * @param {Object} model - The model being drawn
+ * @param {string} zone - The clock the hours are on
+ * @returns {string[]} The sentences to print, in order
+ */
+function forecastFootnotes(model, zone) {
+    return [
+        `Local lapse rate in ºC per 1000 ft. Wind barbs in km/h. Time${zone}. Ground level ${
+            Math.round(model.ground)} m asl.`,
+        'Forecast, not measured: every number here is from Environment Canada\'s HRDPS model, which is the model the Canadian RASP is built on, read at this launch\'s own coordinates.',
+        'Blue hatching is air within half a degree of its dew point. The solid line is where a thermal stops climbing; the dashed line under it is where the climb drops below a glider\'s own sink, and it stops at cloudbase.',
+        'Thermals are released from the ground temperature the model forecasts, with no trigger offset, and the climb rate uses the model\'s own surface heat fluxes — the same method the RASP uses, with the same constants.'
+    ];
+}
+
+/**
+ * How the forecast windgram differs from the measured one, as settings.
+ *
+ * Only four things do. There is no shade strip because a forecast has no
+ * pyranometer to miss; the barbs sit lower because there are no station rules
+ * for them to clear, only the ground; the empty state is about a day rather
+ * than a log; and the footnotes have an entirely different confession to make.
+ *
+ * @type {Object}
+ */
+export const FORECAST_VIEW = {
+    strips: FORECAST_STRIPS,
+    barbOffsetFeet: 200,
+    empty: 'No forecast for this day yet.',
+    footnotes: forecastFootnotes
+};
 
 /** Isotherms are drawn every this many degrees, the way the RASP does. */
 export const ISOTHERM_STEP = 5;

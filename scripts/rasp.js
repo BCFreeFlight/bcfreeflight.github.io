@@ -1,9 +1,16 @@
-import {COLUMN_MS, CEILING, GROUND_MARGIN, ISOTHERM_STEP, CLOUD_DEPRESSION} from './config/rasp.js';
+import {
+    COLUMN_MS, CEILING, ISOTHERM_STEP, CLOUD_DEPRESSION,
+    FLOOR_BELOW_FEET, CEILING_ABOVE_FEET, MINIMUM_DEPTH,
+    SUN_MARGIN_MS, WINDOW_STEP_MS, FORECAST_WINDOW
+} from './config/rasp.js';
 import {LAPSE} from './config/bands.js';
 import {band, isNumber} from './lib/numbers.js';
 import {lapseRate, MINIMUM_GAP} from './lib/lapse.js';
-import {sunHeight, clearSky, shadeFraction} from './lib/solar.js';
-import {temperatureAt, thermalTop, updraft, heatFlux, climbTop} from './lib/thermal.js';
+import {binomial} from './lib/smooth.js';
+import {sunHeight, clearSky, shadeFraction, sunTimes} from './lib/solar.js';
+import {
+    temperatureAt, thermalTop, updraft, heatFlux, climbTop, triggerFor, LCL_PER_DEGREE
+} from './lib/thermal.js';
 import sounding from './sounding.js';
 
 /**
@@ -27,10 +34,10 @@ export const FEET = 0.3048;
 // that a day of columns is still a few thousand samples.
 const SAMPLE_STEP = 60;
 
-// Roughly how far a parcel has to rise before it reaches its dew point, per
-// degree of spread between temperature and dew point. The standard field
-// approximation, and accurate to a few percent over the range that matters.
-const LCL_PER_DEGREE = 125;
+// A modelled level closer than this to a station is dropped: the station owns
+// that height, and two levels a few metres apart make a slab with no depth to
+// take a colour.
+const MINIMUM_SEPARATION = 40;
 
 /**
  * Over how long the temperature is averaged before the air between two stations
@@ -193,13 +200,108 @@ function columnise(day, dayStart, count) {
  * @param {Object} upper - The level above
  * @returns {?Object} rate and the band it falls in, or null for a zero gap
  */
-function slab(lower, upper) {
+export function slab(lower, upper) {
     const gap = (upper.elevationFeet - lower.elevationFeet) / 1000;
     if (Math.abs(gap) < MINIMUM_GAP) return null;
 
     const rate = lapseRate(lower.temp, upper.temp, gap);
 
     return {rate, band: band(LAPSE, rate)};
+}
+
+
+/**
+ * How far above the top station the model is still pulled towards it, in metres.
+ *
+ * The top station and the model rarely agree about the temperature at the top
+ * station's own height — today Silver Star reads nearly four degrees warmer than
+ * HRDPS thinks the air there is, which is an ordinary amount for a thermometer
+ * on a ski hill against a 2.5 km grid square. Spliced together raw, that
+ * disagreement became a four-degree step at exactly 1,662 m, and the drawing
+ * rendered the step as a superadiabatic slab: a bright red band sitting on the
+ * top station all afternoon, which was an artefact of the join and not a
+ * property of the air.
+ *
+ * So the correction is carried upward and faded out. A thermometer's quarrel
+ * with a model is mostly about the ground it is standing on, and that influence
+ * does not reach far: a kilometre above it the model is on its own.
+ */
+const OFFSET_FADE = 1000;
+
+/**
+ * The modelled column, moved onto the measured one.
+ *
+ * The model knows the shape of the air — where the inversion sits, how deep it
+ * is, where it breaks — far better than three thermometers strung up a hillside
+ * can. What it does not know is the temperature *here*: its grid square is
+ * 2.5 km across and its idea of the ground is a smoothed version of a valley
+ * that is neither smooth nor a single height.
+ *
+ * So this takes the shape and keeps the readings. Each station's disagreement
+ * with the model at its own height is measured, and the model's profile is
+ * shifted by those disagreements — blended linearly between one station and the
+ * next, so the corrected profile passes exactly through every reading and takes
+ * the model's structure in between. Above the top station the last correction
+ * fades out over `OFFSET_FADE`.
+ *
+ * The alternative, and what this replaces, was a straight line between one
+ * station and the next: a 561-metre slab of a single colour, which cannot show
+ * an inversion that is a hundred metres deep and cannot show it breaking.
+ *
+ * @param {Object[]} stations - Ascending measured levels, with elevation and temp
+ * @param {Object[]} modelled - Ascending modelled levels, with elevation and temp
+ * @returns {Object[]} The modelled levels, corrected, ready to merge
+ */
+export function anchored(stations, modelled) {
+    if (!stations.length || !modelled.length) return [];
+
+    // What each station says the model is out by, at its own height.
+    const errors = stations.map(station => ({
+        elevation: station.elevation,
+        error: station.temp - (temperatureAt(modelled, station.elevation)?.temp ?? station.temp)
+    }));
+
+    const top = errors.at(-1);
+
+    /**
+     * @param {number} height - Metres above sea level
+     * @returns {number} How much to move the model by, in ºC
+     */
+    const correction = height => {
+        if (height <= errors[0].elevation) return errors[0].error;
+
+        for (let i = 0; i < errors.length - 1; i++) {
+            const below = errors[i];
+            const above = errors[i + 1];
+            if (height > above.elevation) continue;
+
+            const share = (height - below.elevation) / (above.elevation - below.elevation);
+
+            return below.error + share * (above.error - below.error);
+        }
+
+        // Above the top station, fading to nothing.
+        const reach = Math.min(1, (height - top.elevation) / OFFSET_FADE);
+
+        return top.error * (1 - reach);
+    };
+
+    const highest = stations.at(-1).elevation;
+
+    return modelled
+        // A level a station is standing on is the station's; there is nothing
+        // for the model to add at a height something is measuring.
+        .filter(level => stations.every(station =>
+            Math.abs(level.elevation - station.elevation) > MINIMUM_SEPARATION))
+        .map(level => ({
+            ...level,
+            temp: level.temp + correction(level.elevation),
+            elevationFeet: level.elevation / FEET,
+            // Only the air above the top station is a guess about somewhere
+            // nothing is reporting from. Between the stations the model is
+            // shaping a column that is anchored at both ends.
+            aloft: level.elevation > highest
+        }));
 }
 
 /**
@@ -263,7 +365,7 @@ function heightAtTemperature(levels, value, ceiling) {
  * @param {number} top - The highest station, in metres
  * @returns {Object[]} Bands of {from, to}, in metres
  */
-function cloudBands(levels, ground, top) {
+export function cloudBands(levels, ground, top) {
     const damp = levels.filter(level => isNumber(level.dewpt));
     if (damp.length < 2) return [];
 
@@ -291,25 +393,108 @@ function cloudBands(levels, ground, top) {
     return bands;
 }
 
+const HOUR = 60 * 60 * 1000;
+
+/**
+ * The hours every windgram on the panel is drawn across.
+ *
+ * The sun sets the window rather than the clock, because the question all three
+ * are answering is about a flying day and a flying day is bounded by daylight —
+ * which moves through the year, and moves differently at different latitudes.
+ * An hour of margin either side catches the morning inversion breaking and the
+ * evening shutting down.
+ *
+ * Rounded to the half hour on the site's own clock rather than in UTC, so the
+ * axis reads in round numbers everywhere and not only in the timezones that
+ * happen to sit a whole number of hours off it.
+ *
+ * @param {number} midnight - Local midnight of the day being drawn
+ * @param {number} offset - The site's offset from UTC, in milliseconds
+ * @param {number} latitude - Degrees north
+ * @param {number} longitude - Degrees east
+ * @returns {Object} dayStart and lastTime, in milliseconds
+ */
+export function flyingWindow(midnight, offset, latitude, longitude) {
+    // Noon, so the answer is this day's sun rather than the edge of it.
+    const {sunrise, sunset} = sunTimes(midnight + 12 * HOUR, latitude, longitude);
+
+    // No sunrise to measure from, which happens inside the arctic circle in
+    // either direction. The clock is all that is left.
+    if (!Number.isFinite(sunrise) || !Number.isFinite(sunset)) {
+        return {
+            dayStart: midnight + FORECAST_WINDOW.startHour * HOUR,
+            lastTime: midnight + FORECAST_WINDOW.endHour * HOUR
+        };
+    }
+
+    const round = at => Math.round((at + offset) / WINDOW_STEP_MS) * WINDOW_STEP_MS - offset;
+
+    return {dayStart: round(sunrise - SUN_MARGIN_MS), lastTime: round(sunset + SUN_MARGIN_MS)};
+}
+
+/**
+ * The frame every windgram on the panel is drawn in.
+ *
+ * The measured day and the two forecasts were each sizing themselves to their
+ * own contents, which made them impossible to read against one another: the
+ * same thermal top landed at a different height in each, and the measured
+ * drawing's fixed ceiling quietly clipped its own answer. One frame, built from
+ * all of them, fixes both.
+ *
+ * @param {Array<?Object>} models - The drawings that will share the frame
+ * @param {number} lowest - The lowest station's elevation, in metres
+ * @returns {Object} floor and ceiling, in metres above sea level
+ */
+export function sharedFrame(models, lowest) {
+    const floor = lowest - FLOOR_BELOW_FEET * FEET;
+
+    // The top of the lift, across every drawing that will share this frame.
+    // Taken from all of them together so that switching between the day so far
+    // and the two forecasts moves the weather and not the axis: a climb that is
+    // higher tomorrow should look higher, not fill the same panel.
+    const tops = models
+        .filter(Boolean)
+        .flatMap(model => model.columns.map(column => column.thermalTop))
+        .filter(isNumber);
+
+    const ceiling = tops.length
+        ? Math.max(...tops) + CEILING_ABOVE_FEET * FEET
+        : floor + MINIMUM_DEPTH;
+
+    return {floor, ceiling: Math.max(ceiling, floor + MINIMUM_DEPTH)};
+}
+
 /**
  * Builds the whole drawing's model from the days already read for each station.
  *
  * @param {Object[]} entries - {station, elevationFeet, latitude, longitude, day}
  * @param {?Object} [modelled] - The modelled air above the stations, when it is known
+ * @param {?Object} [frame] - The floor and ceiling shared with the other
+ *     drawings. Left out, the drawing sizes itself to its own stations, which
+ *     is right for a windgram that is the only one on the page.
  * @returns {?Object} The model, or null when there is nothing to draw
  */
-export function buildWindgram(entries, modelled = null) {
+export function buildWindgram(entries, modelled = null, frame = null) {
     const charted = entries
         .filter(entry => entry.day?.times?.length && Number.isFinite(entry.elevationFeet))
         .sort((a, b) => a.elevationFeet - b.elevationFeet);
 
     if (!charted.length) return null;
 
-    const dayStart = Math.min(...charted.map(entry => entry.day.dayStart));
+    const midnight = Math.min(...charted.map(entry => entry.day.dayStart));
 
-    // The drawing stops at the last thing anyone measured. A windgram that ran
-    // to midnight would be three quarters empty for most of the flying day.
-    const lastTime = Math.max(...charted.map(entry => entry.day.times.at(-1)));
+    // Solar position is worked out at the lowest station: the three are within
+    // ten kilometres of each other, which is a rounding error at this scale.
+    const {latitude, longitude} = charted[0];
+
+    // The same daylight window the forecasts use, so the three can be read
+    // against one another. The part of it that has not happened yet is drawn as
+    // the gap it is rather than by stopping the axis at the last reading, which
+    // used to make the measured day a different width from every other drawing
+    // and a different width again every half hour.
+    const {dayStart, lastTime} = flyingWindow(
+        midnight, charted[0].day.offset, latitude, longitude);
+
     const count = Math.max(1, Math.ceil((lastTime - dayStart) / COLUMN_MS));
 
     const aggregated = charted.map(entry => columnise(entry.day, dayStart, count));
@@ -332,12 +517,11 @@ export function buildWindgram(entries, modelled = null) {
     const pressures = barometer?.readings ? aggregated[barometer.index] : null;
 
     const ground = charted[0].elevationFeet * FEET;
-    const floor = ground - GROUND_MARGIN;
-    const ceiling = Math.max(CEILING, charted.at(-1).elevationFeet * FEET + 500);
 
-    // Solar position is worked out at the lowest station: the three are within
-    // ten kilometres of each other, which is a rounding error at this scale.
-    const {latitude, longitude} = charted[0];
+    const {floor, ceiling} = frame ?? {
+        floor: ground - FLOOR_BELOW_FEET * FEET,
+        ceiling: Math.max(CEILING, charted.at(-1).elevationFeet * FEET + 500)
+    };
 
     /**
      * Where a thermal is taken to start.
@@ -371,15 +555,15 @@ export function buildWindgram(entries, modelled = null) {
             }))
             .filter(level => isNumber(level.temp));
 
-        // The measured column, continued upward by the model. Only above the
-        // highest station that is reporting: everything below it is air a
-        // thermometer is standing in, and a reading beats a forecast.
+        // The measured column, shaped by the model between the stations and
+        // continued by it above them. The readings are never overwritten — see
+        // `anchored`, which moves the model onto them rather than the other way
+        // round — so a thermometer still wins at its own height.
         const overhead = levels.length
-            ? sounding.profileAt(modelled, time, levels.at(-1).elevation)
-                .map(level => ({...level, elevationFeet: level.elevation / FEET}))
+            ? anchored(levels, sounding.profileAt(modelled, time, levels[0].elevation))
             : [];
 
-        const profile = [...levels, ...overhead];
+        const profile = [...levels, ...overhead].sort((a, b) => a.elevation - b.elevation);
 
         const segments = [];
         for (let level = 0; level < profile.length - 1; level++) {
@@ -393,9 +577,11 @@ export function buildWindgram(entries, modelled = null) {
                 // Clipped, so a model level well above the drawing does not
                 // stretch the last band off the top of it.
                 to: Math.min(profile[level + 1].elevation, ceiling),
-                // Drawn knocked back either way: the reader is being told this
-                // part was not measured here, and by what.
-                extrapolated: Boolean(profile[level + 1].modelled),
+                // Knocked back only above the top station. A modelled level
+                // between two stations is bracketed by readings at both ends,
+                // which is a different and much better-supported claim than one
+                // above everything that is reporting.
+                extrapolated: Boolean(profile[level + 1].aloft),
                 modelled: Boolean(profile[level + 1].modelled),
                 ...measured
             });
@@ -404,7 +590,7 @@ export function buildWindgram(entries, modelled = null) {
         // With no model to continue it, the last measured gradient is all there
         // is, so it is carried upward the way it always was — separately, so it
         // can be drawn as the guess it is rather than as another measurement.
-        const above = !overhead.length && segments.length
+        const above = !overhead.some(level => level.aloft) && segments.length
             ? {
                 from: levels.at(-1).elevation,
                 to: ceiling,
@@ -431,7 +617,11 @@ export function buildWindgram(entries, modelled = null) {
         const climbing = profile.filter(level => level.elevation >= launchElevation - 1);
         const surface = climbing[0] ?? profile[0];
 
-        const top = sunlit ? thermalTop(climbing, ceiling) : null;
+        // The allowance for the unmeasured superadiabatic layer at the ground,
+        // scaled by how hard the sun is actually driving it.
+        const top = sunlit
+            ? thermalTop(climbing, ceiling, {trigger: triggerFor(irradiance)})
+            : null;
 
         // How much of that sunlight becomes heat in the air. The sunlight is
         // always the station's own pyranometer; only the share is modelled,
@@ -439,26 +629,11 @@ export function buildWindgram(entries, modelled = null) {
         // report and it is what decides the strength of the day.
         const flux = heatFlux(irradiance, sounding.shareAt(modelled, time));
 
-        const lift = top !== null && flux !== null
-            ? updraft(top - surface.elevation, flux, surface.temp, surface.elevation)
-            : null;
-
         // Cloud base as a pilot works it out: the spread between temperature
         // and dew point at the surface, times the rate the two converge.
         const base = surface && isNumber(surface.dewpt)
             ? surface.elevation + LCL_PER_DEGREE * Math.max(0, surface.temp - surface.dewpt)
             : null;
-
-        // How high a wing still climbs, which is lower than where the bubble
-        // stops — and lower again when there is cloud in the way, because that
-        // is where the climb ends whatever the air is doing above it.
-        const usable = top !== null && lift !== null
-            ? climbTop(top, surface.elevation, lift)
-            : null;
-
-        const climbCeiling = usable !== null && base !== null
-            ? Math.min(usable, base)
-            : usable;
 
         const rain = aggregated.map(station => station[i].precipRate).filter(isNumber);
         const pressure = pressures && isNumber(pressures[i].pressure) ? pressures[i].pressure : null;
@@ -469,17 +644,66 @@ export function buildWindgram(entries, modelled = null) {
             profile,
             segments,
             above,
+            // The climb figures are all worked out from the thermal top, and
+            // only once it has been smoothed. See below.
             thermalTop: top,
-            climbTop: climbCeiling,
+            flux,
+            surface,
             cloudBase: base !== null && base < ceiling ? base : null,
             shade,
             cloud: sounding.cloudAt(modelled, time),
-            lift,
             pressure,
             rain: rain.length ? Math.max(...rain) : null,
-            clouds: levels.length ? cloudBands(levels, floor, levels.at(-1).elevation) : []
+            // Only between the stations. Below the lowest one both the
+            // temperature and the dew point are being continued at their own
+            // gradients, and two straight lines with different slopes always
+            // meet: hatching there is a cloud layer invented by arithmetic in
+            // air nothing is standing in. The same argument the top of this
+            // function makes about extrapolating upward.
+            clouds: levels.length > 1
+                ? cloudBands(levels, levels[0].elevation, levels.at(-1).elevation)
+                : []
         });
     }
+
+    // Smoothed before anything is derived from them, exactly as the forecast
+    // does it. Both are crossings — the height where the parcel curve meets the
+    // sounding, and the height where the temperature meets the dew point — and
+    // between two half-hourly columns the stations can disagree by a tenth of a
+    // degree, which is nothing as a temperature and several hundred metres as a
+    // thermal top.
+    //
+    // The order matters and used to be wrong: the climb rate and the climb
+    // height were worked out from the raw thermal top while the *line* drawn
+    // for that top was smoothed, so the strip and the line were answering from
+    // two different numbers.
+    ['thermalTop', 'cloudBase'].forEach(field => {
+        const smoothed = binomial(columns.map(column => column[field]));
+        columns.forEach((column, index) => { column[field] = smoothed[index]; });
+    });
+
+    columns.forEach(column => {
+        const {thermalTop: top, flux, surface, cloudBase} = column;
+
+        column.lift = top !== null && flux !== null
+            ? updraft(top - surface.elevation, flux, surface.temp, surface.elevation)
+            : null;
+
+        // How high a wing still climbs, which is lower than where the bubble
+        // stops — and lower again when there is cloud in the way, because that
+        // is where the climb ends whatever the air is doing above it.
+        const usable = top !== null && column.lift
+            ? climbTop(top, surface.elevation, column.lift)
+            : null;
+
+        column.climbTop = usable !== null && cloudBase !== null
+            ? Math.min(usable, cloudBase)
+            : usable;
+
+        // Carried only so far as the derivation; nothing draws them.
+        delete column.flux;
+        delete column.surface;
+    });
 
     return {
         dayStart,
@@ -501,7 +725,7 @@ export function buildWindgram(entries, modelled = null) {
         // Whether the air above the top station came from the model or from
         // continuing the last measured gradient. The footnotes say which, since
         // the two deserve different amounts of trust.
-        modelledAloft: columns.some(column => column.segments.some(segment => segment.modelled)),
+        modelledAloft: columns.some(column => column.segments.some(segment => segment.extrapolated)),
         columns,
         isotherms: isotherms(columns, ceiling)
     };
@@ -518,7 +742,7 @@ export function buildWindgram(entries, modelled = null) {
  * @param {number} ceiling - The top of the drawing, in metres
  * @returns {Object[]} One {value, runs} per contour
  */
-function isotherms(columns, ceiling) {
+export function isotherms(columns, ceiling) {
     const temps = columns.flatMap(column => (column.profile ?? column.levels).map(level => level.temp));
     if (temps.length < 2) return [];
 

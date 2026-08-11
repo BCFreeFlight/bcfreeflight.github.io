@@ -939,6 +939,57 @@ a { color: var(--accent); }
     touch-action: pan-y;
 }
 
+/* The forecast windgram is a third view of the same panel rather than a card of
+   its own: it answers the same question as the measured one, for a different
+   day, and a reader comparing the two should not have to scroll between them. */
+.forecast-host[hidden],
+.trend-days[hidden] { display: none; }
+
+/* Which day the windgram is drawing: separate pills rather than the joined
+   control the layout buttons use. Those three are one question with one answer
+   and read as a single switch; these pick between a day that happened and two
+   that have not, which is a bigger step than a change of layout — so they are
+   the station tabs' own shape, at the size of a control rather than a heading. */
+.trend-days {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+    margin-top: .7rem;
+}
+
+.trend-day {
+    appearance: none;
+    padding: .25rem .8rem;
+    border: 2px solid var(--rule-strong);
+    border-radius: 999px;
+    background: var(--surface);
+    font: inherit;
+    font-size: .75rem;
+    font-weight: 700;
+    color: var(--ink-muted);
+    cursor: pointer;
+    transition: border-color .15s, background-color .15s, color .15s;
+}
+
+.trend-day:hover:not([aria-pressed="true"]) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.trend-day[aria-pressed="true"] {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    cursor: default;
+}
+
+.forecast-host {
+    position: relative;
+    margin-top: .9rem;
+    touch-action: pan-y;
+}
+
 .windgram-svg { display: block; width: 100%; height: auto; overflow: visible; }
 
 .windgram-bed { fill: #f8fafc; }

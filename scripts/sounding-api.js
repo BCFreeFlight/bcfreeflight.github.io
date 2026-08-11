@@ -45,9 +45,13 @@ const SOUNDING_MODEL = 'gem_hrdps_continental';
  * Each is asked for twice — its temperature, and the height it happens to be at
  * this hour, since a pressure level is not a fixed altitude.
  *
+ * Spaced 25 hPa apart low down, which is the RASP's own spacing and is what puts
+ * a level inside each gap between the stations: they stand five and six hundred
+ * metres apart, and a morning inversion is a fraction of that deep.
+ *
  * @type {number[]}
  */
-export const LEVELS = [1000, 950, 900, 850, 800, 750, 700, 650, 600];
+export const LEVELS = [1000, 950, 925, 900, 875, 850, 800, 750, 700, 650, 600];
 
 // A whole day behind, and no further forward than the hour we are in. The
 // windgram never draws the future, so nothing here asks for one: `past_hours`

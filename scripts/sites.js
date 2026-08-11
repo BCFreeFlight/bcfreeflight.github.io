@@ -127,11 +127,16 @@ export class Sites {
      * @returns {?Object} latitude and longitude, or null when unstated
      */
     coordinates(coordinates) {
-        const {latitude, longitude} = coordinates ?? {};
+        const {latitude, longitude, elevation} = coordinates ?? {};
 
         if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
 
-        return {latitude, longitude};
+        // Elevation is optional and separate from the both-or-neither rule the
+        // pair above follows: a station can be placed without its height being
+        // known. Where it *is* known it is the site's own figure and it beats
+        // the one Weather Underground carries, which is whatever the station's
+        // owner typed into a form.
+        return {latitude, longitude, elevation: Number.isFinite(elevation) ? elevation : null};
     }
 
     /**

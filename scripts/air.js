@@ -1,7 +1,7 @@
 import api, {onGrid} from './air-api.js';
 import * as bands from './config/bands.js';
 import {AIR_CACHE_SECONDS, STORAGE_KEYS} from './config/defaults.js';
-import {readJson, writeJson} from './lib/storage.js';
+import {remembered, remember} from './lib/cache.js';
 import {band, isNumber} from './lib/numbers.js';
 
 /**
@@ -37,10 +37,11 @@ export class AirQuality {
         if (!isNumber(latitude) || !isNumber(longitude)) return null;
 
         const key = STORAGE_KEYS.air(onGrid(latitude), onGrid(longitude));
-        const cached = readJson(key);
-        const age = (Date.now() - (cached?.fetchedAt ?? 0)) / 1000;
+        // The value, null to hold off after a failed read, or undefined to go
+        // and ask. See `lib/cache.js`.
+        const held = remembered(key, 'air', AIR_CACHE_SECONDS);
 
-        if (cached?.air && age < AIR_CACHE_SECONDS) return cached.air;
+        if (held !== undefined) return held;
 
         // Both the tiles and the chart ask for the same square at once. Without
         // this they would each start their own request and each write the answer.
@@ -48,7 +49,9 @@ export class AirQuality {
 
         const request = this.fetchAir(latitude, longitude)
             .then(air => {
-                if (air) writeJson(key, {fetchedAt: Date.now(), air});
+                // Remembered either way: a failure is an answer too, and asking
+                // again a minute later is how a rate limit becomes a rate limit.
+                remember(key, 'air', air);
                 return air;
             })
             .finally(() => this.inFlight.delete(key));

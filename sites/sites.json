@@ -11,7 +11,8 @@
           "cacheSeconds": 60,
           "coordinates": {
             "latitude": 50.285548,
-            "longitude": -118.984665
+            "longitude": -118.984665,
+            "elevation": 1056.4
           },
           "launch": {
             "start": 100,
@@ -29,7 +30,8 @@
           "cacheSeconds": 1800,
           "coordinates": {
             "latitude": 50.265725,
-            "longitude": -118.967077
+            "longitude": -118.967077,
+            "elevation": 495.0
           }
         },
         {
@@ -38,8 +40,9 @@
           "wunderground": "IVERNO71",
           "cacheSeconds": 1800,
           "coordinates": {
-            "latitude": 50.368490,
-            "longitude": -119.063354
+            "latitude": 50.36849,
+            "longitude": -119.063354,
+            "elevation": 1662.1
           }
         }
       ]

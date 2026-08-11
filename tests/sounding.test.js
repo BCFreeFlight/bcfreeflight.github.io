@@ -311,7 +311,10 @@ describe('holding on to the air aloft', () => {
             equal(await service.load(LUMBY.lat, LUMBY.lon), null);
         });
 
-        equal(localStorage.getItem(STORAGE_KEYS.sounding(50.3, -119)), null, 'and caches nothing');
+        // The failure is remembered — as a marker, not a value — so a page
+        // refreshing every minute does not ask again every minute.
+        const held = JSON.parse(localStorage.getItem(STORAGE_KEYS.sounding(50.3, -119)));
+        equal(held.sounding, null, 'and holds nothing worth serving');
         forget();
     });
 

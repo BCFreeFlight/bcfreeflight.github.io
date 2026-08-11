@@ -6,7 +6,8 @@ import youtube from './youtube.js';
 import trends from './trends.js';
 import * as readings from './readings.js';
 import {READOUTS} from './config/readouts.js';
-import {CAMERA_CHECK_MS, RETRY_MS} from './config/defaults.js';
+import {CAMERA_CHECK_MS, RETRY_MS, STORAGE_KEYS} from './config/defaults.js';
+import {readJson, writeJson} from './lib/storage.js';
 import {MAP_CREDIT, MAP_FRAME, MAP_ZOOM, tileUrl} from './config/map.js';
 import {Loop} from './lib/loop.js';
 import {isNumber} from './lib/numbers.js';
@@ -435,6 +436,10 @@ export class Index {
         // A chart cannot size itself inside a hidden panel, so it is told the
         // moment its panel is on screen.
         trends.reveal(key);
+
+        // Remembered so a reader who watches one station on a hillside comes
+        // back to that station rather than to the launch every time.
+        writeJson(STORAGE_KEYS.station(this.slug), key);
     }
 
     /**
@@ -489,8 +494,11 @@ export class Index {
             });
         });
 
-        // Keep the reader where they were, unless that station has since gone dark.
-        const restored = preferredKey && lookup[preferredKey] ? preferredKey : enabled[0].station.key;
+        // Keep the reader where they were, unless that station has since gone
+        // dark. Within a session that is whichever tab was open before the
+        // refresh; on a fresh visit it is whichever they left open last time.
+        const remembered = preferredKey ?? readJson(STORAGE_KEYS.station(this.slug), null);
+        const restored = remembered && lookup[remembered] ? remembered : enabled[0].station.key;
         this.activateView(restored, lookup);
     }
 
@@ -628,7 +636,9 @@ export class Index {
         const lastUpdatedElement = document.getElementById('last-updated');
 
         try {
-            const site = await sites.site(sites.slugFromPage());
+            this.slug = sites.slugFromPage();
+
+            const site = await sites.site(this.slug);
 
             // Name the page before fetching anything, so a station that fails
             // still leaves the site identified rather than blank.

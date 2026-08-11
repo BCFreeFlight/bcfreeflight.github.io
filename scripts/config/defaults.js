@@ -40,6 +40,13 @@ export const AIR_CACHE_SECONDS = 30 * 60;
 // hourly cadence.
 export const SOUNDING_CACHE_SECONDS = 30 * 60;
 
+// The forecast, which changes less often than either. HRDPS runs four times a
+// day and takes a couple of hours to publish, so most of a half-hour window
+// returns numbers that have not moved at all — and unlike the readings, a
+// forecast that is thirty minutes old is not stale in any sense a pilot cares
+// about.
+export const FORECAST_CACHE_SECONDS = 30 * 60;
+
 // Checking the camera costs a hidden player, so it lags well behind the
 // readings rather than running with them.
 export const CAMERA_CHECK_MS = 5 * 60 * 1000;
@@ -84,8 +91,16 @@ export const STORAGE_KEYS = {
     // any one of them: two stations on the same hillside read the same square.
     air: (latitude, longitude) => `air_quality_${latitude}_${longitude}`,
     sounding: (latitude, longitude) => `sounding_${latitude}_${longitude}`,
+    // Not rounded onto a grid the way the other two are. The forecast carries
+    // the terrain height of the point it was asked about, and around Cooper's a
+    // tenth of a degree is a few hundred metres of hillside.
+    forecast: (latitude, longitude) => `forecast_${latitude}_${longitude}`,
     liveView: 'live_view_mode',
     liveWeather: 'live_weather_visible',
     trendSeries: 'trend_series',
-    trendMode: 'trend_mode'
+    trendMode: 'trend_mode',
+    windgramDay: 'windgram_day',
+    // Per site, because which station a reader watches is a property of the
+    // hill they fly, not of the browser.
+    station: slug => `station_${slug}`
 };

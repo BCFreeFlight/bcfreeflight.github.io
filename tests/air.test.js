@@ -4,6 +4,7 @@ import {AirQuality} from '../scripts/air.js';
 import {airColumn} from '../scripts/air-series.js';
 import {READOUTS} from '../scripts/config/readouts.js';
 import {STORAGE_KEYS} from '../scripts/config/defaults.js';
+import {FAILURE_BACKOFF_SECONDS} from '../scripts/lib/cache.js';
 
 /**
  * Air quality, and the ways it is allowed to be missing.
@@ -137,15 +138,42 @@ describe('reading the air', () => {
         forget();
     });
 
-    it('caches nothing from a failure', async () => {
+    it('remembers a failure, so it does not ask straight back', async () => {
+        // Not the value — a marker. Open-Meteo answers 429 when it wants to be
+        // left alone, and a page that refreshes every minute used to take that
+        // as an invitation to ask again a minute later.
         forget();
         const service = new AirQuality();
 
         await withFetch(() => response({status: 500, body: {}}), async () => {
-            await service.load(LUMBY.lat, LUMBY.lon);
+            equal(await service.load(LUMBY.lat, LUMBY.lon), null);
         });
 
-        equal(localStorage.getItem(STORAGE_KEYS.air(50.3, -119)), null);
+        const held = JSON.parse(localStorage.getItem(STORAGE_KEYS.air(50.3, -119)));
+        equal(held.air, null, 'nothing worth serving');
+        ok(held.fetchedAt > 0, 'but the moment it was asked');
+
+        await withFetch(() => { throw new Error('asked again too soon'); }, async calls => {
+            equal(await service.load(LUMBY.lat, LUMBY.lon), null);
+            equal(calls.length, 0, 'and it holds off');
+        });
+
+        forget();
+    });
+
+    it('tries again once the backoff has run out', async () => {
+        forget();
+
+        localStorage.setItem(STORAGE_KEYS.air(50.3, -119), JSON.stringify({
+            fetchedAt: Date.now() - (FAILURE_BACKOFF_SECONDS + 60) * 1000,
+            air: null
+        }));
+
+        await withFetch(() => response({body: current}), async calls => {
+            await new AirQuality().load(LUMBY.lat, LUMBY.lon);
+            ok(calls.length > 0, 'a stale failure is not a permanent one');
+        });
+
         forget();
     });
 

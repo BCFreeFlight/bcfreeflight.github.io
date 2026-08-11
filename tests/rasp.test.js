@@ -1,12 +1,12 @@
 import {describe, it, equal, ok, close, fixture} from './runner.js';
 import {SERIES} from '../scripts/config/series.js';
 import {History} from '../scripts/history.js';
-import {buildWindgram, FEET} from '../scripts/rasp.js';
+import {buildWindgram, anchored, FEET} from '../scripts/rasp.js';
 import {Windgram} from '../scripts/windgram.js';
 import {Chart} from '../scripts/chart.js';
 import {barbCounts, barbPath, PENNANT, MAXIMUM_FEATHERS, CALM_RINGS} from '../scripts/lib/barb.js';
 import {sunHeight, clearSky, shadeFraction, sunTimes} from '../scripts/lib/solar.js';
-import {temperatureAt, thermalTop, updraft, heatFlux, climbTop, DRY_ADIABAT, HEAT_FRACTION, GLIDER_SINK} from '../scripts/lib/thermal.js';
+import {temperatureAt, thermalTop, updraft, heatFlux, climbTop, triggerFor, DRY_ADIABAT, HEAT_FRACTION, GLIDER_SINK, TRIGGER_OFFSET, FULL_SUN} from '../scripts/lib/thermal.js';
 import {CEILING, COLUMN_MS, STRIPS} from '../scripts/config/rasp.js';
 import {reveal} from '../scripts/lib/reveal.js';
 
@@ -76,9 +76,14 @@ const FIVE = 5 * 60 * 1000;
  * @param {Object} options - How many readings, and what each column holds
  * @returns {Object} A day
  */
-function staged({hours = 6, ...columns} = {}) {
+function staged({hours = 6, from = 6, ...columns} = {}) {
     const count = Math.round(hours * 60 / 5);
-    const times = Array.from({length: count}, (unused, index) => MIDNIGHT + index * FIVE);
+
+    // Readings start in the morning rather than at midnight, because the
+    // drawing's window now runs from an hour before sunrise: a day staged from
+    // midnight would have most of its readings outside the frame.
+    const times = Array.from({length: count},
+        (unused, index) => MIDNIGHT + from * 60 * 60 * 1000 + index * FIVE);
 
     const values = {};
     Object.entries(columns).forEach(([key, value]) => {
@@ -377,8 +382,13 @@ describe('how high a thermal gets', () => {
     // An inversion: warmer above than below, so nothing goes anywhere.
     const inverted = [{elevation: 500, temp: 10}, {elevation: 1500, temp: 15}];
 
-    it('runs to the ceiling when the air keeps cooling fast enough', () => {
-        equal(thermalTop(unstable, 3000), 3000);
+    it('stops at the top of the profile when the air keeps cooling fast enough', () => {
+        // Not at the ceiling. Above the topmost level the environment is a
+        // straight line continued from below, and a parcel raced against a
+        // straight line wins for as long as the line is drawn — so a search
+        // that ran to the ceiling would be measuring the drawing, not the air.
+        equal(thermalTop(unstable, 3000), unstable.at(-1).elevation);
+        equal(thermalTop(unstable, 1000), 1000, 'and at the ceiling when that is lower');
     });
 
     it('finds nothing under an inversion, given nothing to trigger on', () => {
@@ -469,17 +479,26 @@ describe('turning sunlight into heat', () => {
 
 describe('the height a wing can still climb to', () => {
     it('sits above the strongest part of the thermal and below the top', () => {
-        const top = climbTop(3000, 300, 3);
+        const top = climbTop(3000, 300, 0.8);
         const depth = 3000 - 300;
 
-        // The profile peaks around a quarter of the way up and dies out at
-        // nine tenths, so the answer has to be between them.
-        ok(top > 300 + 0.25 * depth, `${top} should be above the peak`);
-        ok(top < 300 + 0.91 * depth, `${top} should be below where the climb dies out`);
+        // The profile peaks a third of the way up and is still going at the top
+        // of the layer, so a wing runs out of climb somewhere between them.
+        ok(top > 300 + 0.3125 * depth, `${top} should be above the peak`);
+        ok(top < 3000, `${top} should be below the top of the layer`);
     });
 
     it('is higher on a stronger day', () => {
-        ok(climbTop(3000, 300, 4) > climbTop(3000, 300, 1.5));
+        ok(climbTop(3000, 300, 0.8) > climbTop(3000, 300, 0.6));
+    });
+
+    it('reaches the top of the layer when the whole of it beats the wing', () => {
+        // The climb only falls to 0.8 of the layer mean at the very top, so any
+        // day with a mean much past a metre a second is climbable all the way —
+        // and it is then cloudbase, not the air, that ends the climb.
+        // Within the search tolerance of the top, which is as close as a
+        // bisection gets to an answer sitting on the edge of its range.
+        close(climbTop(3000, 300, 3), 3000, 10);
     });
 
     it('is nothing when the air never beats the glider', () => {
@@ -492,15 +511,15 @@ describe('the height a wing can still climb to', () => {
     });
 
     it('gives way to a heavier wing', () => {
-        const light = climbTop(3000, 300, 3, {sink: 0.8});
-        const heavy = climbTop(3000, 300, 3, {sink: 1.5});
+        const light = climbTop(3000, 300, 0.8, {sink: 0.8});
+        const heavy = climbTop(3000, 300, 0.8, {sink: 1.5});
 
         ok(heavy < light, 'a faster sink rate runs out of climb lower down');
     });
 
     it('uses the same sink rate the Canadian RASP does', () => {
         equal(GLIDER_SINK, 1.0);
-        equal(climbTop(3000, 300, 3), climbTop(3000, 300, 3, {sink: GLIDER_SINK}));
+        equal(climbTop(3000, 300, 0.8), climbTop(3000, 300, 0.8, {sink: GLIDER_SINK}));
     });
 });
 
@@ -528,12 +547,20 @@ describe('building the windgram', () => {
         close(model.stations[0].elevation, 1624 * FEET, 1e-6);
     });
 
-    it('stops at the last reading rather than running on to midnight', () => {
+    it('runs from an hour before sunrise to an hour after sunset', () => {
         const model = buildWindgram(real());
-        const last = model.columns.at(-1).time;
+        const {sunrise, sunset} = sunTimes(model.dayStart + 12 * 3600000,
+            model.latitude, model.longitude);
 
-        ok(last <= model.lastTime + COLUMN_MS, 'no columns past the last reading');
-        ok(model.lastTime < model.dayStart + 86400000, 'and the day is not over');
+        const HALF = 30 * 60 * 1000;
+
+        // Both ends land on a half hour of the site's own clock.
+        [model.dayStart, model.lastTime].forEach(edge =>
+            equal((edge + model.offset) % HALF, 0, `${edge} is on a half hour`));
+
+        close(model.dayStart, sunrise - 3600000, HALF / 2 + 1);
+        close(model.lastTime, sunset + 3600000, HALF / 2 + 1);
+        ok(model.lastTime - model.dayStart < 86400000, 'and it is still one day');
     });
 
     it('divides the day into columns of the configured width', () => {
@@ -658,7 +685,14 @@ describe('smoothing the profile', () => {
         const steady = profile({temp: 20}, {temp: 10});
         const spiked = profile({temp: index => index === 12 ? 24 : 20}, {temp: 10});
 
-        const rateOf = model => model.columns[2]?.segments[0]?.rate ?? null;
+        // The column the spike actually lands in, rather than a fixed index:
+        // the drawing's window starts before sunrise, so which column that is
+        // depends on the time of year.
+        const spikeAt = MIDNIGHT + 6 * 3600000 + 12 * FIVE;
+
+        const rateOf = model => model.columns.reduce((best, column) =>
+            Math.abs(column.time - spikeAt) < Math.abs(best.time - spikeAt) ? column : best,
+        model.columns[0])?.segments[0]?.rate ?? null;
 
         const before = rateOf(buildWindgram(steady));
         const after = rateOf(buildWindgram(spiked));
@@ -666,6 +700,124 @@ describe('smoothing the profile', () => {
         ok(before !== null && after !== null, 'both drew a slab');
         ok(Math.abs(after - before) < 0.5,
             `a single spike moved the lapse rate by ${Math.abs(after - before).toFixed(2)} ºC/1000 ft`);
+    });
+});
+
+
+
+describe('the allowance for the layer no thermometer sees', () => {
+    it('is nothing in the dark', () => {
+        equal(triggerFor(0), 0);
+        equal(triggerFor(null), 0);
+    });
+
+    it('is the full allowance under a strong sun', () => {
+        equal(triggerFor(FULL_SUN), TRIGGER_OFFSET);
+        equal(triggerFor(FULL_SUN * 2), TRIGGER_OFFSET, 'and no more than that');
+    });
+
+    it('is scaled down when the sun is weak', () => {
+        // The layer is made by the sun, so at first light there is barely any
+        // of it. Applied flat, the allowance claimed thermals before there was
+        // anything driving them.
+        close(triggerFor(FULL_SUN / 2), TRIGGER_OFFSET / 2, 1e-9);
+        ok(triggerFor(60) < 0.3, `${triggerFor(60)} at the sunlight threshold`);
+    });
+
+    it('lifts a morning parcel less far than an afternoon one', () => {
+        const levels = [{elevation: 500, temp: 20}, {elevation: 3000, temp: 2}];
+
+        const morning = thermalTop(levels, 4000, {trigger: triggerFor(100)});
+        const afternoon = thermalTop(levels, 4000, {trigger: triggerFor(800)});
+
+        ok(morning < afternoon, `${morning} should be under ${afternoon}`);
+    });
+});
+
+describe('moving the model onto the measurements', () => {
+    // Three stations up a hillside and a model that disagrees with all of them,
+    // which is the ordinary case rather than the awkward one.
+    const stations = [
+        {elevation: 500, temp: 15},
+        {elevation: 1000, temp: 16},
+        {elevation: 1600, temp: 11}
+    ];
+
+    const modelled = [
+        {elevation: 600, temp: 10, modelled: true},
+        {elevation: 800, temp: 13, modelled: true},
+        {elevation: 1300, temp: 9, modelled: true},
+        {elevation: 2200, temp: 4, modelled: true}
+    ];
+
+    it('keeps every reading exactly where the thermometer put it', () => {
+        const moved = anchored(stations, modelled);
+        const profile = [...stations, ...moved].sort((a, b) => a.elevation - b.elevation);
+
+        stations.forEach(station => {
+            close(temperatureAt(profile, station.elevation).temp, station.temp, 1e-9,
+                `${station.elevation} m still reads ${station.temp}`);
+        });
+    });
+
+    it('takes the model\'s shape between them', () => {
+        // The model has an inversion between 600 m and 800 m — three degrees of
+        // warming — and a straight line between two stations cannot show it.
+        const profile = [...stations, ...anchored(stations, modelled)]
+            .sort((a, b) => a.elevation - b.elevation);
+
+        const low = temperatureAt(profile, 600).temp;
+        const high = temperatureAt(profile, 800).temp;
+
+        ok(high > low, `${low} at 600 m should be under ${high} at 800 m`);
+    });
+
+    it('fades the correction out above the top station', () => {
+        const moved = anchored(stations, modelled);
+        const near = moved.find(level => level.elevation === 2200);
+
+        // The top station is 2 degrees over the model there; a level 600 m
+        // above it keeps some of that, and nothing keeps all of it.
+        const error = stations.at(-1).temp - temperatureAt(modelled, 1600).temp;
+
+        ok(Math.abs(near.temp - 4) < Math.abs(error), 'moved less than the full correction');
+        ok(near.temp !== 4, 'but moved');
+    });
+
+    it('marks only the levels above the top station as a guess', () => {
+        const moved = anchored(stations, modelled);
+
+        equal(moved.filter(level => level.aloft).map(level => level.elevation), [2200]);
+        equal(moved.filter(level => !level.aloft).map(level => level.elevation), [600, 800, 1300]);
+    });
+
+    it('drops a level a station is already standing on', () => {
+        const moved = anchored(stations, [...modelled, {elevation: 1010, temp: 5, modelled: true}]);
+
+        equal(moved.some(level => Math.abs(level.elevation - 1000) < 40), false);
+    });
+
+    it('has nothing to say without one side or the other', () => {
+        equal(anchored([], modelled), []);
+        equal(anchored(stations, []), []);
+    });
+
+    it('splits the gap between the stations into real slabs', () => {
+        // The point of the exercise. Silver Star and Cooper's are six hundred
+        // metres apart, and a single slab that deep cannot show a hundred-metre
+        // inversion at all, let alone show it breaking.
+        // Levels inside the gap between the two staged stations, which sit at
+        // 305 m and 1,524 m — the spacing the real hillside has.
+        const model = buildWindgram(SOARING(),
+            sky({levels: [[800, 14], [1200, 11], [1800, 8], [2400, 2], [3200, -6]]}));
+
+        const column = midday(model);
+
+        ok(column.segments.length > 2,
+            `${column.segments.length} slabs, where three stations alone give two`);
+
+        const under = column.segments.filter(segment => !segment.extrapolated);
+        ok(under.length > 1, 'more than one of them below the top station');
     });
 });
 
@@ -802,6 +954,11 @@ describe('drawing it', () => {
         const last = hits.reduce((best, hit) =>
             Number(hit.getAttribute('cx')) > Number(best.getAttribute('cx')) ? hit : best, hits[0]);
 
+        // Moved to the edge rather than trusting the last reading to be there.
+        // The window runs to an hour past sunset, so on any afternoon the
+        // right-hand end of the drawing is hours of empty frame.
+        last.setAttribute('cx', String(windgram.right - 4));
+
         windgram.showTip(last);
 
         const box = host.querySelector('.windgram-tip-box');
@@ -872,8 +1029,12 @@ describe('drawing it', () => {
  * @param {Object} [options] - The levels, the cloud, and the share of sun that becomes heat
  * @returns {Object} A model in the shape the sounding service hands over
  */
-function sky({levels = [[1800, 8], [2400, 2], [3200, -6]], cloud = 40, share = 0.5, hours = 8} = {}) {
-    const times = Array.from({length: hours + 1}, (unused, index) => MIDNIGHT + index * 3600000);
+function sky({levels = [[1800, 8], [2400, 2], [3200, -6]], cloud = 40, share = 0.5,
+    from = 6, hours = 8} = {}) {
+    // Over the same hours the staged stations report, so the modelled air is
+    // actually there for the columns the assertions look at.
+    const times = Array.from({length: hours + 1},
+        (unused, index) => MIDNIGHT + (from + index) * 3600000);
 
     return {
         times,
@@ -898,7 +1059,12 @@ const SOARING = () => profile({temp: 30, solar: 800}, {temp: 10});
  * @returns {Object} One column
  */
 function midday(model) {
-    return model.columns[Math.floor(model.columns.length / 2)];
+    // The middle of the part that was logged, rather than the middle of the
+    // frame: the frame now runs from before sunrise to after sunset, and a
+    // staged day fills only some of it.
+    const charted = model.columns.filter(column => column.levels.length);
+
+    return charted[Math.floor(charted.length / 2)] ?? model.columns[0];
 }
 
 describe('the air above the top station', () => {
@@ -966,8 +1132,9 @@ describe('how high a wing actually climbs', () => {
     });
 
     it('is nothing at all on a day that never climbs faster than a glider sinks', () => {
-        // Barely any sun, so the layer mean never beats the wing.
-        const weak = buildWindgram(profile({temp: 30, solar: 70}, {temp: 10}), sky({share: 0.03}));
+        // Barely any sun, and almost none of it becoming heat, so the layer mean
+        // never gets anywhere near the wing.
+        const weak = buildWindgram(profile({temp: 30, solar: 70}, {temp: 10}), sky({share: 0.01}));
         equal(midday(weak).climbTop, null);
     });
 
@@ -1145,12 +1312,12 @@ describe('marking the day on the drawings', () => {
         ok(!markup.includes('chart-sun-line'), 'no marks rather than marks at midnight');
     });
 
-    it('marks only what falls inside the windgram, which stops at the last reading', () => {
-        // The staged day runs to lunchtime, so sunrise is in the frame and
-        // sunset is hours past the right-hand edge.
+    it('marks both ends of the day, which the window is built around', () => {
+        // The frame runs an hour either side of the sun, so both marks fall
+        // inside it by construction rather than by luck of the staging.
         const markup = draw(buildWindgram(SOARING(), sky()));
 
-        ok(markup.includes('windgram-sun-line'), 'sunrise is marked');
-        ok(!markup.includes('>Sunset<'), 'and a sunset off the end of the drawing is not');
+        ok(markup.includes('>Sunrise<'), 'sunrise is marked');
+        ok(markup.includes('>Sunset<'), 'and so is sunset');
     });
 });

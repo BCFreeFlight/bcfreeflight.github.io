@@ -232,9 +232,27 @@ describe('where each station stands', () => {
     });
 
     it('puts each one where it actually is', () => {
-        equal(stations.Coopers.coordinates, {latitude: 50.285548, longitude: -118.984665});
-        equal(stations.FFP.coordinates, {latitude: 50.265725, longitude: -118.967077});
-        equal(stations.SilverStar.coordinates, {latitude: 50.36849, longitude: -119.063354});
+        equal(stations.Coopers.coordinates,
+            {latitude: 50.285548, longitude: -118.984665, elevation: 1056.4});
+        equal(stations.FFP.coordinates,
+            {latitude: 50.265725, longitude: -118.967077, elevation: 495});
+        equal(stations.SilverStar.coordinates,
+            {latitude: 50.36849, longitude: -119.063354, elevation: 1662.1});
+    });
+
+    it('states how high each one stands, in metres', () => {
+        // The whole vertical geometry of the windgram is built on these — where
+        // the slabs sit, which station the parcel leaves from, how the model is
+        // anchored to the hillside. Weather Underground also reports an
+        // elevation, but it is whatever the station's owner typed into a form.
+        site.stations.forEach(station => {
+            ok(Number.isFinite(station.coordinates?.elevation), `${station.name} elevation`);
+        });
+    });
+
+    it('leaves the height out rather than guessing when it is not stated', () => {
+        equal(sites.coordinates({latitude: 1, longitude: 2}).elevation, null);
+        equal(sites.coordinates({latitude: 1, longitude: 2, elevation: 'high'}).elevation, null);
     });
 
     it('is kept apart from the launch window, which only one of them has', () => {
