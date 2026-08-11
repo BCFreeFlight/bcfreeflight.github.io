@@ -316,6 +316,65 @@ a { color: var(--accent); }
     box-shadow: var(--shadow);
 }
 
+/* --- The ground under the station ----------------------------------------
+   A topographic map behind the direction tile, washed out until it is texture
+   rather than a picture. It is there to say what the bearing points at, and it
+   has to lose every contest with the arrow and the compass point in front of
+   it — so it is faint, desaturated, and the tile keeps its own white behind the
+   text. */
+
+.wind-card--direction {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+}
+
+.wind-map {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+}
+
+/* Built at a fixed size and centred in whatever the card turns out to be, so
+   the station stays in the middle of the tile at every width without anything
+   having to measure the card first. */
+.wind-map-frame {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    /* Satellite imagery takes a lighter hand than the drawn map this started
+       as: knocked back to a third it stopped being recognisable ground and
+       became fog. Enough of it to make out the clearing and the treeline, and
+       no more — the arrow and the compass point still have to win. */
+    opacity: .55;
+    filter: saturate(.85) contrast(.92);
+    /* Fades to nothing at the edges rather than stopping at a hard line, which
+       would read as a photograph pasted into the card. */
+    mask-image: radial-gradient(ellipse at center, #000 35%, transparent 78%);
+}
+
+.wind-map-frame img {
+    position: absolute;
+    display: block;
+}
+
+/* A condition of using the imagery, not a caption. Quiet, but it has to stay
+   readable wherever it lands — and what it lands on is a photograph, which may
+   be pale gravel or dark timber. Hence the halo: without it the line
+   disappeared entirely over the trees. */
+.wind-map-credit {
+    position: absolute;
+    right: .5rem;
+    bottom: .35rem;
+    margin: 0;
+    font-size: .5625rem;
+    line-height: 1;
+    color: var(--ink-muted);
+    text-shadow: 0 0 4px var(--page), 0 0 2px var(--page);
+}
+
 /* The same glyph the live page uses, turned to the wind. */
 .wind-arrow {
     align-self: center;

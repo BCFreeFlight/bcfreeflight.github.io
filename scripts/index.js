@@ -7,7 +7,10 @@ import trends from './trends.js';
 import * as readings from './readings.js';
 import {READOUTS} from './config/readouts.js';
 import {CAMERA_CHECK_MS, RETRY_MS} from './config/defaults.js';
+import {MAP_CREDIT, MAP_FRAME, MAP_ZOOM, tileUrl} from './config/map.js';
 import {Loop} from './lib/loop.js';
+import {isNumber} from './lib/numbers.js';
+import {mosaic, TILE} from './lib/tiles.js';
 
 const NO_READING = readings.NO_READING;
 
@@ -49,6 +52,80 @@ export class Index {
                       aria-label="Wind from the ${direction}${
                           offLaunch ? ', outside the launch direction' : ''}"
                       style="transform: rotate(${wind.rotation}deg);">navigation</span>`;
+    }
+
+    /**
+     * The ground the station stands on, behind the arrow.
+     *
+     * A bearing is an abstraction until you can see what it points at. With the
+     * hill under it, "SE" stops being a compass point and starts being the
+     * valley the wind is coming up — and the ridge that is why the launch faces
+     * the way it does is right there in the contours.
+     *
+     * The coordinates are the station's own, out of its observation, so the map
+     * is centred on the instrument rather than on whatever the configuration
+     * claims. Nothing in sites.json names a place on the ground.
+     *
+     * Only the frame is drawn here, carrying the coordinates it will be filled
+     * from. The tiles themselves are someone else's servers, and they can wait
+     * until the readings are on screen — which is also why `paintMaps` is a
+     * separate step rather than a dozen image elements in this string.
+     *
+     * @param {Object} observation - A station observation
+     * @returns {string} HTML markup, or nothing when the station reports no
+     *     position to centre on
+     */
+    renderWindMap(observation) {
+        const latitude = observation?.lat;
+        const longitude = observation?.lon;
+
+        // Tested before conversion, deliberately: Number(null) is zero, and a
+        // station that reports no longitude would otherwise be mapped to the
+        // Gulf of Guinea rather than left without a map.
+        if (!isNumber(latitude) || !isNumber(longitude)) return '';
+
+        return `
+            <div class="wind-map" data-latitude="${latitude}" data-longitude="${longitude}">
+                <div class="wind-map-frame" aria-hidden="true"
+                     style="width: ${MAP_FRAME.width}px; height: ${MAP_FRAME.height}px;"></div>
+                <p class="wind-map-credit">${MAP_CREDIT}</p>
+            </div>`;
+    }
+
+    /**
+     * Fills every empty map frame on the page with its tiles.
+     *
+     * Called once the panels are on screen, and skips any frame it has already
+     * filled: the ground under a station does not change between readings, and
+     * re-requesting a mosaic every minute would be a dozen requests to a
+     * volunteer-run tile server for a picture that is already there.
+     *
+     * The imagery source is a parameter rather than a constant so that a test
+     * can fill a frame without calling out to Esri, and so that swapping the
+     * layer is a one-line change at the call site if the licence ever moves.
+     *
+     * @param {ParentNode} [root=document] - Where to look for frames
+     * @param {function(number, number, number): string} [url=tileUrl] - Tile URL from z, x, y
+     * @returns {void}
+     */
+    paintMaps(root = document, url = tileUrl) {
+        root.querySelectorAll('.wind-map').forEach(map => {
+            const frame = map.querySelector('.wind-map-frame');
+            if (!frame || frame.childElementCount) return;
+
+            const tiles = mosaic({
+                latitude: Number(map.dataset.latitude),
+                longitude: Number(map.dataset.longitude),
+                zoom: MAP_ZOOM,
+                url,
+                width: MAP_FRAME.width,
+                height: MAP_FRAME.height
+            });
+
+            frame.innerHTML = tiles.map(tile =>
+                `<img src="${tile.url}" alt="" width="${TILE}" height="${TILE}"
+                      decoding="async" style="left: ${tile.left}px; top: ${tile.top}px;">`).join('');
+        });
     }
 
     /**
@@ -139,12 +216,15 @@ export class Index {
      * it stands.
      *
      * @param {Object} wind - A shared wind reading
+     * @param {Object} observation - The observation it was read from
      * @returns {string} HTML markup
      */
-    renderWindRow(wind) {
+    renderWindRow(wind, observation) {
         return `
                 <div class="wind-row">
                     <section class="wind-card wind-card--direction">
+                        ${this.renderWindMap(observation)}
+
                         <span class="label"><span class="label-icon" aria-hidden="true">explore</span>Wind direction</span>
 
                         ${this.renderWindArrow(wind)}
@@ -170,7 +250,7 @@ export class Index {
         return `
             <div class="view" id="panel-${key}" role="tabpanel" tabindex="0"
                  aria-labelledby="tab-${key}" data-view="${key}" hidden>
-                ${this.renderWindRow(readings.wind(entry.observation, entry.station.launch))}
+                ${this.renderWindRow(readings.wind(entry.observation, entry.station.launch), entry.observation)}
                 ${this.renderReadouts(entry.observation, entry.metrics, entry.air)}
                 ${trends.render(entry.station)}
             </div>`;
@@ -249,8 +329,7 @@ export class Index {
             const view = document.querySelector(`.view[data-view="${key}"]`);
             if (!view || !entry.online) return;
 
-            const wind = view.querySelector('.wind-row');
-            if (wind) wind.outerHTML = this.renderWindRow(readings.wind(entry.observation, entry.station.launch));
+            this.updateWind(view, readings.wind(entry.observation, entry.station.launch));
 
             const readouts = view.querySelector('.readouts');
             if (readouts) readouts.outerHTML = this.renderReadouts(entry.observation, entry.metrics, entry.air);
@@ -259,6 +338,43 @@ export class Index {
         // The charts read their own day on their own cadence; this asks them to
         // take the newest one without unmounting anything.
         trends.refresh();
+    }
+
+    /**
+     * The newest wind reading, written into the tiles already on screen.
+     *
+     * The arrow, the compass point and the speed are replaced; nothing else in
+     * the two tiles is touched. That matters now the direction tile carries a
+     * map: rewriting the row every minute would throw away a dozen tile
+     * elements and build a dozen more, and even served from cache they blink.
+     * The ground under the station has not moved since the last reading either
+     * way.
+     *
+     * @param {Element} view - The station's panel
+     * @param {Object} wind - A shared wind reading
+     * @returns {void}
+     */
+    updateWind(view, wind) {
+        const arrow = view.querySelector('.wind-arrow');
+        if (arrow) arrow.outerHTML = this.renderWindArrow(wind);
+
+        const cardinal = view.querySelector('.wind-cardinal');
+        if (cardinal) cardinal.textContent = wind.cardinal;
+
+        const speed = view.querySelector('.wind-speed');
+        if (speed) speed.innerHTML = `${wind.speed}<span class="unit">km/h</span>`;
+
+        // The gust line comes and goes with the gust, so it is replaced rather
+        // than rewritten: there may be no element there to write into.
+        const card = view.querySelector('.wind-card--speed');
+        const gust = view.querySelector('.wind-gust');
+
+        if (gust) gust.remove();
+
+        if (card && wind.gusting) {
+            card.insertAdjacentHTML('beforeend',
+                `<p class="wind-gust">Gusting to <strong>${wind.gust} km/h</strong></p>`);
+        }
     }
 
     /**
@@ -577,6 +693,11 @@ export class Index {
 
                 this.rendered = signature;
             }
+
+            // The ground under each station, once its readings are up. Behind
+            // them in every sense: a dozen tiles from someone else's server
+            // should not be in the way of the number the reader came for.
+            this.paintMaps();
 
             // Deliberately not awaited: the readings are already on screen.
             this.updateCameraLink(site);
