@@ -174,12 +174,47 @@ const MINIMUM_DEPTH = 50;
  * the shallow superadiabatic layer right at the ground, which is hotter than
  * the screen-height reading and is not measured by anything we have.
  *
+ * The Canadian RASP needs no such allowance, and it is worth being clear about
+ * why rather than treating this as a free parameter. Its parcel also starts
+ * from a 2 m temperature — but its next reading up is a pressure level a few
+ * hundred metres above the ground, and the model resolves the superadiabatic
+ * layer in between. The parcel is genuinely buoyant on the model's own numbers.
+ * Here the lowest level *is* the thermometer, so that layer is invisible and
+ * has to be allowed for.
+ *
  * Two and a half degrees is the usual allowance, and it is what the thermal
  * index method assumes when it is done by hand off a sounding. It is the single
  * most consequential number in this file: raise it and every thermal gets
  * higher.
  */
 export const TRIGGER_OFFSET = 2.5;
+
+/**
+ * The sunlight at which the ground is heating hard enough to earn the whole
+ * allowance above, in W/m².
+ *
+ * The superadiabatic layer is made by the sun, so the allowance for it cannot
+ * be a constant across the day: applied flat, it punched the same two and a
+ * half degrees into the profile at first light as at two in the afternoon, and
+ * the drawing claimed thermals well before there was anything driving them.
+ *
+ * Seven hundred is roughly the point past which more sunshine stops making the
+ * surface layer meaningfully deeper. Below it the allowance is scaled down in
+ * proportion. This is a heuristic — unlike everything else in this file it is
+ * not from the RASP, which has no equivalent because it does not need one.
+ */
+export const FULL_SUN = 700;
+
+/**
+ * The allowance to lift a parcel with, for the sunlight actually measured.
+ * @param {?number} irradiance - Sunlight reaching the ground, in W/m²
+ * @returns {number} Degrees to add to the surface temperature
+ */
+export function triggerFor(irradiance) {
+    if (!(irradiance > 0)) return 0;
+
+    return TRIGGER_OFFSET * Math.min(1, irradiance / FULL_SUN);
+}
 
 /**
  * The temperature of the air at a height, read off the measured profile.

@@ -6,7 +6,7 @@ import {Windgram} from '../scripts/windgram.js';
 import {Chart} from '../scripts/chart.js';
 import {barbCounts, barbPath, PENNANT, MAXIMUM_FEATHERS, CALM_RINGS} from '../scripts/lib/barb.js';
 import {sunHeight, clearSky, shadeFraction, sunTimes} from '../scripts/lib/solar.js';
-import {temperatureAt, thermalTop, updraft, heatFlux, climbTop, DRY_ADIABAT, HEAT_FRACTION, GLIDER_SINK} from '../scripts/lib/thermal.js';
+import {temperatureAt, thermalTop, updraft, heatFlux, climbTop, triggerFor, DRY_ADIABAT, HEAT_FRACTION, GLIDER_SINK, TRIGGER_OFFSET, FULL_SUN} from '../scripts/lib/thermal.js';
 import {CEILING, COLUMN_MS, STRIPS} from '../scripts/config/rasp.js';
 import {reveal} from '../scripts/lib/reveal.js';
 
@@ -703,6 +703,36 @@ describe('smoothing the profile', () => {
     });
 });
 
+
+
+describe('the allowance for the layer no thermometer sees', () => {
+    it('is nothing in the dark', () => {
+        equal(triggerFor(0), 0);
+        equal(triggerFor(null), 0);
+    });
+
+    it('is the full allowance under a strong sun', () => {
+        equal(triggerFor(FULL_SUN), TRIGGER_OFFSET);
+        equal(triggerFor(FULL_SUN * 2), TRIGGER_OFFSET, 'and no more than that');
+    });
+
+    it('is scaled down when the sun is weak', () => {
+        // The layer is made by the sun, so at first light there is barely any
+        // of it. Applied flat, the allowance claimed thermals before there was
+        // anything driving them.
+        close(triggerFor(FULL_SUN / 2), TRIGGER_OFFSET / 2, 1e-9);
+        ok(triggerFor(60) < 0.3, `${triggerFor(60)} at the sunlight threshold`);
+    });
+
+    it('lifts a morning parcel less far than an afternoon one', () => {
+        const levels = [{elevation: 500, temp: 20}, {elevation: 3000, temp: 2}];
+
+        const morning = thermalTop(levels, 4000, {trigger: triggerFor(100)});
+        const afternoon = thermalTop(levels, 4000, {trigger: triggerFor(800)});
+
+        ok(morning < afternoon, `${morning} should be under ${afternoon}`);
+    });
+});
 
 describe('moving the model onto the measurements', () => {
     // Three stations up a hillside and a model that disagrees with all of them,

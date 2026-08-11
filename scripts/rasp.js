@@ -8,7 +8,9 @@ import {band, isNumber} from './lib/numbers.js';
 import {lapseRate, MINIMUM_GAP} from './lib/lapse.js';
 import {binomial} from './lib/smooth.js';
 import {sunHeight, clearSky, shadeFraction, sunTimes} from './lib/solar.js';
-import {temperatureAt, thermalTop, updraft, heatFlux, climbTop, LCL_PER_DEGREE} from './lib/thermal.js';
+import {
+    temperatureAt, thermalTop, updraft, heatFlux, climbTop, triggerFor, LCL_PER_DEGREE
+} from './lib/thermal.js';
 import sounding from './sounding.js';
 
 /**
@@ -615,7 +617,11 @@ export function buildWindgram(entries, modelled = null, frame = null) {
         const climbing = profile.filter(level => level.elevation >= launchElevation - 1);
         const surface = climbing[0] ?? profile[0];
 
-        const top = sunlit ? thermalTop(climbing, ceiling) : null;
+        // The allowance for the unmeasured superadiabatic layer at the ground,
+        // scaled by how hard the sun is actually driving it.
+        const top = sunlit
+            ? thermalTop(climbing, ceiling, {trigger: triggerFor(irradiance)})
+            : null;
 
         // How much of that sunlight becomes heat in the air. The sunlight is
         // always the station's own pyranometer; only the share is modelled,
