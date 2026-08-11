@@ -6,6 +6,7 @@ import {FEET} from './rasp.js';
 import {barbPath, barbCounts, CALM_RINGS} from './lib/barb.js';
 import {escape} from './lib/markup.js';
 import {reveal} from './lib/reveal.js';
+import {sunTimes} from './lib/solar.js';
 import {pointAt} from './config/compass.js';
 
 /**
@@ -221,6 +222,38 @@ export class Windgram {
     }
 
     /**
+     * Sunrise and sunset, where they fall inside the drawing.
+     *
+     * Usually only sunrise: this chart stops at the last reading a station
+     * logged, so on any afternoon the sunset is still hours off the right-hand
+     * edge and there is nothing to mark. Whichever of the two lands inside the
+     * frame is drawn, and the other is simply not there.
+     *
+     * The station's own coordinates and the day it is drawing are all this
+     * needs — the same sums the shade strip already runs.
+     *
+     * @returns {string} SVG markup
+     */
+    renderSun() {
+        const {sunrise, sunset} = sunTimes(this.model.dayStart + 12 * HOUR,
+            this.model.latitude, this.model.longitude);
+
+        return [{at: sunrise, label: 'Sunrise'}, {at: sunset, label: 'Sunset'}]
+            .filter(mark => Number.isFinite(mark.at)
+                && mark.at >= this.model.dayStart && mark.at <= this.model.lastTime)
+            .map(mark => {
+                const x = this.x(mark.at);
+
+                return `<g class="windgram-sun">
+                    <line class="windgram-sun-line" x1="${x.toFixed(1)}" y1="${this.top}"
+                          x2="${x.toFixed(1)}" y2="${this.bottom}"></line>
+                    <text class="windgram-sun-label" x="${(x + 4).toFixed(1)}"
+                          y="${(this.top + 11).toFixed(1)}">${escape(mark.label)}</text>
+                </g>`;
+            }).join('');
+    }
+
+    /**
      * The strips along the top: pressure, lift, cloud and rain.
      *
      * Each is a filled area on its own scale with its label outside the plot,
@@ -311,6 +344,7 @@ export class Windgram {
                 ${this.renderClimbTop()}
                 ${this.renderCloudBase()}
                 ${this.renderBarbs()}
+                ${this.renderSun()}
             </g>
             <rect class="windgram-frame" x="${this.left}" y="${this.top}"
                   width="${this.right - this.left}" height="${this.bottom - this.top}"></rect>

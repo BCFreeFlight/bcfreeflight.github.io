@@ -3,8 +3,9 @@ import {SERIES} from '../scripts/config/series.js';
 import {History} from '../scripts/history.js';
 import {buildWindgram, FEET} from '../scripts/rasp.js';
 import {Windgram} from '../scripts/windgram.js';
+import {Chart} from '../scripts/chart.js';
 import {barbCounts, barbPath, PENNANT, MAXIMUM_FEATHERS, CALM_RINGS} from '../scripts/lib/barb.js';
-import {sunHeight, clearSky, shadeFraction} from '../scripts/lib/solar.js';
+import {sunHeight, clearSky, shadeFraction, sunTimes} from '../scripts/lib/solar.js';
 import {temperatureAt, thermalTop, updraft, heatFlux, climbTop, DRY_ADIABAT, HEAT_FRACTION, GLIDER_SINK} from '../scripts/lib/thermal.js';
 import {CEILING, COLUMN_MS, STRIPS} from '../scripts/config/rasp.js';
 import {reveal} from '../scripts/lib/reveal.js';
@@ -1021,5 +1022,135 @@ describe('the cloud strip', () => {
         const markup = draw(buildWindgram(SOARING(), sky()));
         ok(markup.includes('>Cloud<'), 'the modelled row');
         ok(markup.includes('>Shade<'), 'and the measured one');
+    });
+});
+
+
+describe('when the sun comes up and goes down', () => {
+    // Vernon, and the two ends of its year.
+    const LATITUDE = 50.3;
+    const LONGITUDE = -119;
+    const AUGUST = Date.UTC(2026, 7, 11, 19);
+    const SOLSTICE = Date.UTC(2026, 5, 21, 19);
+    const MIDWINTER = Date.UTC(2025, 11, 21, 20);
+
+    const minutes = ms => ms / 60000;
+    const daylight = at => {
+        const {sunrise, sunset} = sunTimes(at, LATITUDE, LONGITUDE);
+        return sunset - sunrise;
+    };
+
+    it('agrees with a full solar algorithm to within a couple of minutes', () => {
+        // Open-Meteo's own published times for this day and place, which come
+        // from a complete algorithm rather than this one's series. Checked
+        // against a year of dates when this was written: worst case under two
+        // minutes, which is well inside what the terrain does to a real sunset.
+        const {sunrise, sunset} = sunTimes(AUGUST, LATITUDE, LONGITUDE);
+
+        // The sunset of an August evening in the Okanagan falls on the next
+        // day in UTC, which is exactly the sort of thing this has to get right.
+        close(minutes(sunrise), minutes(Date.UTC(2026, 7, 11, 12, 39)), 3);
+        close(minutes(sunset), minutes(Date.UTC(2026, 7, 12, 3, 22)), 3);
+    });
+
+    it('puts the sun up before noon and down after it', () => {
+        const {sunrise, sunset} = sunTimes(AUGUST, LATITUDE, LONGITUDE);
+        ok(sunrise < sunset, 'and in that order');
+        ok(sunset - sunrise > 12 * 3600000, 'a long August day');
+    });
+
+    it('gives a longer day at midsummer than at midwinter', () => {
+        ok(daylight(SOLSTICE) > daylight(MIDWINTER));
+        ok(minutes(daylight(SOLSTICE)) > 15 * 60, 'nearly sixteen hours in June');
+        ok(minutes(daylight(MIDWINTER)) < 9 * 60, 'and under nine in December');
+    });
+
+    it('is roughly symmetric about the middle of the day', () => {
+        const {sunrise, sunset} = sunTimes(AUGUST, LATITUDE, LONGITUDE);
+        const noon = (sunrise + sunset) / 2;
+
+        // Solar noon at this longitude, which is nearly half an hour off the
+        // clock noon its timezone keeps.
+        const solarNoon = Date.UTC(2026, 7, 11, 20, 0);
+        close(minutes(noon), minutes(solarNoon), 20);
+    });
+
+    it('names no time where there is none to name', () => {
+        // Svalbard, either side of its year.
+        equal(sunTimes(Date.UTC(2026, 5, 21, 12), 78, 15).up, true, 'the midnight sun');
+        equal(sunTimes(Date.UTC(2026, 11, 21, 12), 78, 15).up, false, 'and the polar night');
+
+        [sunTimes(Date.UTC(2026, 5, 21, 12), 78, 15), sunTimes(Date.UTC(2026, 11, 21, 12), 78, 15)]
+            .forEach(day => {
+                equal(day.sunrise, null);
+                equal(day.sunset, null);
+            });
+    });
+
+    it('says nothing at all without somewhere to stand', () => {
+        const nowhere = sunTimes(AUGUST, undefined, undefined);
+
+        equal(nowhere.sunrise, null);
+        equal(nowhere.sunset, null);
+        equal(nowhere.up, null, 'and does not claim it is a polar day either');
+    });
+
+    it('answers for the day it was asked about, wherever that day starts', () => {
+        // Local noon on either side of UTC midnight still has to name the same
+        // sunrise, which is why the panel asks about noon rather than midnight.
+        const {sunrise} = sunTimes(AUGUST, LATITUDE, LONGITUDE);
+        const later = sunTimes(AUGUST + 3 * 3600000, LATITUDE, LONGITUDE);
+
+        close(minutes(sunrise), minutes(later.sunrise), 1);
+    });
+});
+
+describe('marking the day on the drawings', () => {
+    it('rules sunrise and sunset down the chart', () => {
+        const host = document.createElement('div');
+        host.style.cssText = 'width:900px;position:absolute;left:-9999px;top:0';
+        document.body.appendChild(host);
+
+        const chart = new Chart(host);
+        const readings = staged({hours: 12, temp: 15, solar: 400});
+
+        chart.setCatalogue(SERIES);
+        chart.setSun(sunTimes(MIDNIGHT + 12 * 3600000, 50.3, -119));
+        chart.setDay(readings);
+        chart.setView(['temp'], 'split');
+
+        const markup = host.innerHTML;
+        chart.destroy();
+        host.remove();
+
+        ok(markup.includes('chart-sun-line'), 'the lines are drawn');
+        ok(markup.includes('>Sunrise<'), 'and named');
+        ok(markup.includes('>Sunset<'));
+    });
+
+    it('marks nothing on a chart that was never told where the sun is', () => {
+        const host = document.createElement('div');
+        host.style.cssText = 'width:900px;position:absolute;left:-9999px;top:0';
+        document.body.appendChild(host);
+
+        const chart = new Chart(host);
+        chart.setCatalogue(SERIES);
+        chart.setDay(staged({hours: 12, temp: 15}));
+        chart.setView(['temp'], 'split');
+
+        const markup = host.innerHTML;
+        chart.destroy();
+        host.remove();
+
+        ok(!markup.includes('chart-sun-line'), 'no marks rather than marks at midnight');
+    });
+
+    it('marks only what falls inside the windgram, which stops at the last reading', () => {
+        // The staged day runs to lunchtime, so sunrise is in the frame and
+        // sunset is hours past the right-hand edge.
+        const markup = draw(buildWindgram(SOARING(), sky()));
+
+        ok(markup.includes('windgram-sun-line'), 'sunrise is marked');
+        ok(!markup.includes('>Sunset<'), 'and a sunset off the end of the drawing is not');
     });
 });
