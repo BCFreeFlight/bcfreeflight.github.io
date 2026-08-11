@@ -32,6 +32,11 @@ export const FEET = 0.3048;
 // that a day of columns is still a few thousand samples.
 const SAMPLE_STEP = 60;
 
+// A modelled level closer than this to a station is dropped: the station owns
+// that height, and two levels a few metres apart make a slab with no depth to
+// take a colour.
+const MINIMUM_SEPARATION = 40;
+
 /**
  * Over how long the temperature is averaged before the air between two stations
  * is judged.
@@ -200,6 +205,101 @@ export function slab(lower, upper) {
     const rate = lapseRate(lower.temp, upper.temp, gap);
 
     return {rate, band: band(LAPSE, rate)};
+}
+
+
+/**
+ * How far above the top station the model is still pulled towards it, in metres.
+ *
+ * The top station and the model rarely agree about the temperature at the top
+ * station's own height — today Silver Star reads nearly four degrees warmer than
+ * HRDPS thinks the air there is, which is an ordinary amount for a thermometer
+ * on a ski hill against a 2.5 km grid square. Spliced together raw, that
+ * disagreement became a four-degree step at exactly 1,662 m, and the drawing
+ * rendered the step as a superadiabatic slab: a bright red band sitting on the
+ * top station all afternoon, which was an artefact of the join and not a
+ * property of the air.
+ *
+ * So the correction is carried upward and faded out. A thermometer's quarrel
+ * with a model is mostly about the ground it is standing on, and that influence
+ * does not reach far: a kilometre above it the model is on its own.
+ */
+const OFFSET_FADE = 1000;
+
+/**
+ * The modelled column, moved onto the measured one.
+ *
+ * The model knows the shape of the air — where the inversion sits, how deep it
+ * is, where it breaks — far better than three thermometers strung up a hillside
+ * can. What it does not know is the temperature *here*: its grid square is
+ * 2.5 km across and its idea of the ground is a smoothed version of a valley
+ * that is neither smooth nor a single height.
+ *
+ * So this takes the shape and keeps the readings. Each station's disagreement
+ * with the model at its own height is measured, and the model's profile is
+ * shifted by those disagreements — blended linearly between one station and the
+ * next, so the corrected profile passes exactly through every reading and takes
+ * the model's structure in between. Above the top station the last correction
+ * fades out over `OFFSET_FADE`.
+ *
+ * The alternative, and what this replaces, was a straight line between one
+ * station and the next: a 561-metre slab of a single colour, which cannot show
+ * an inversion that is a hundred metres deep and cannot show it breaking.
+ *
+ * @param {Object[]} stations - Ascending measured levels, with elevation and temp
+ * @param {Object[]} modelled - Ascending modelled levels, with elevation and temp
+ * @returns {Object[]} The modelled levels, corrected, ready to merge
+ */
+export function anchored(stations, modelled) {
+    if (!stations.length || !modelled.length) return [];
+
+    // What each station says the model is out by, at its own height.
+    const errors = stations.map(station => ({
+        elevation: station.elevation,
+        error: station.temp - (temperatureAt(modelled, station.elevation)?.temp ?? station.temp)
+    }));
+
+    const top = errors.at(-1);
+
+    /**
+     * @param {number} height - Metres above sea level
+     * @returns {number} How much to move the model by, in ºC
+     */
+    const correction = height => {
+        if (height <= errors[0].elevation) return errors[0].error;
+
+        for (let i = 0; i < errors.length - 1; i++) {
+            const below = errors[i];
+            const above = errors[i + 1];
+            if (height > above.elevation) continue;
+
+            const share = (height - below.elevation) / (above.elevation - below.elevation);
+
+            return below.error + share * (above.error - below.error);
+        }
+
+        // Above the top station, fading to nothing.
+        const reach = Math.min(1, (height - top.elevation) / OFFSET_FADE);
+
+        return top.error * (1 - reach);
+    };
+
+    const highest = stations.at(-1).elevation;
+
+    return modelled
+        // A level a station is standing on is the station's; there is nothing
+        // for the model to add at a height something is measuring.
+        .filter(level => stations.every(station =>
+            Math.abs(level.elevation - station.elevation) > MINIMUM_SEPARATION))
+        .map(level => ({
+            ...level,
+            temp: level.temp + correction(level.elevation),
+            elevationFeet: level.elevation / FEET,
+            // Only the air above the top station is a guess about somewhere
+            // nothing is reporting from. Between the stations the model is
+            // shaping a column that is anchored at both ends.
+            aloft: level.elevation > highest
+        }));
 }
 
 /**
@@ -453,15 +553,15 @@ export function buildWindgram(entries, modelled = null, frame = null) {
             }))
             .filter(level => isNumber(level.temp));
 
-        // The measured column, continued upward by the model. Only above the
-        // highest station that is reporting: everything below it is air a
-        // thermometer is standing in, and a reading beats a forecast.
+        // The measured column, shaped by the model between the stations and
+        // continued by it above them. The readings are never overwritten — see
+        // `anchored`, which moves the model onto them rather than the other way
+        // round — so a thermometer still wins at its own height.
         const overhead = levels.length
-            ? sounding.profileAt(modelled, time, levels.at(-1).elevation)
-                .map(level => ({...level, elevationFeet: level.elevation / FEET}))
+            ? anchored(levels, sounding.profileAt(modelled, time, levels[0].elevation))
             : [];
 
-        const profile = [...levels, ...overhead];
+        const profile = [...levels, ...overhead].sort((a, b) => a.elevation - b.elevation);
 
         const segments = [];
         for (let level = 0; level < profile.length - 1; level++) {
@@ -475,9 +575,11 @@ export function buildWindgram(entries, modelled = null, frame = null) {
                 // Clipped, so a model level well above the drawing does not
                 // stretch the last band off the top of it.
                 to: Math.min(profile[level + 1].elevation, ceiling),
-                // Drawn knocked back either way: the reader is being told this
-                // part was not measured here, and by what.
-                extrapolated: Boolean(profile[level + 1].modelled),
+                // Knocked back only above the top station. A modelled level
+                // between two stations is bracketed by readings at both ends,
+                // which is a different and much better-supported claim than one
+                // above everything that is reporting.
+                extrapolated: Boolean(profile[level + 1].aloft),
                 modelled: Boolean(profile[level + 1].modelled),
                 ...measured
             });
@@ -486,7 +588,7 @@ export function buildWindgram(entries, modelled = null, frame = null) {
         // With no model to continue it, the last measured gradient is all there
         // is, so it is carried upward the way it always was — separately, so it
         // can be drawn as the guess it is rather than as another measurement.
-        const above = !overhead.length && segments.length
+        const above = !overhead.some(level => level.aloft) && segments.length
             ? {
                 from: levels.at(-1).elevation,
                 to: ceiling,
@@ -600,7 +702,7 @@ export function buildWindgram(entries, modelled = null, frame = null) {
         // Whether the air above the top station came from the model or from
         // continuing the last measured gradient. The footnotes say which, since
         // the two deserve different amounts of trust.
-        modelledAloft: columns.some(column => column.segments.some(segment => segment.modelled)),
+        modelledAloft: columns.some(column => column.segments.some(segment => segment.extrapolated)),
         columns,
         isotherms: isotherms(columns, ceiling)
     };

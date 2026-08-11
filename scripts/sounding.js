@@ -200,8 +200,11 @@ export class Sounding {
     /**
      * The modelled profile at one moment, above a given height.
      *
-     * Only the part above is returned. Below it the stations are standing in the
-     * air being asked about, and a measurement beats a model every time.
+     * Read from the lowest station rather than the highest, because the model is
+     * now used for the *shape* of the air between the stations as well as for
+     * the air above them. What it is not used for is the temperature: see
+     * `anchored` in `rasp.js`, which holds the measurements and borrows only the
+     * structure between them.
      *
      * @param {?Object} sounding - A shaped model
      * @param {number} time - The moment being drawn, in milliseconds

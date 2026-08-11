@@ -1,7 +1,7 @@
 import {describe, it, equal, ok, close, fixture} from './runner.js';
 import {SERIES} from '../scripts/config/series.js';
 import {History} from '../scripts/history.js';
-import {buildWindgram, FEET} from '../scripts/rasp.js';
+import {buildWindgram, anchored, FEET} from '../scripts/rasp.js';
 import {Windgram} from '../scripts/windgram.js';
 import {Chart} from '../scripts/chart.js';
 import {barbCounts, barbPath, PENNANT, MAXIMUM_FEATHERS, CALM_RINGS} from '../scripts/lib/barb.js';
@@ -695,6 +695,94 @@ describe('smoothing the profile', () => {
         ok(before !== null && after !== null, 'both drew a slab');
         ok(Math.abs(after - before) < 0.5,
             `a single spike moved the lapse rate by ${Math.abs(after - before).toFixed(2)} ºC/1000 ft`);
+    });
+});
+
+
+describe('moving the model onto the measurements', () => {
+    // Three stations up a hillside and a model that disagrees with all of them,
+    // which is the ordinary case rather than the awkward one.
+    const stations = [
+        {elevation: 500, temp: 15},
+        {elevation: 1000, temp: 16},
+        {elevation: 1600, temp: 11}
+    ];
+
+    const modelled = [
+        {elevation: 600, temp: 10, modelled: true},
+        {elevation: 800, temp: 13, modelled: true},
+        {elevation: 1300, temp: 9, modelled: true},
+        {elevation: 2200, temp: 4, modelled: true}
+    ];
+
+    it('keeps every reading exactly where the thermometer put it', () => {
+        const moved = anchored(stations, modelled);
+        const profile = [...stations, ...moved].sort((a, b) => a.elevation - b.elevation);
+
+        stations.forEach(station => {
+            close(temperatureAt(profile, station.elevation).temp, station.temp, 1e-9,
+                `${station.elevation} m still reads ${station.temp}`);
+        });
+    });
+
+    it('takes the model\'s shape between them', () => {
+        // The model has an inversion between 600 m and 800 m — three degrees of
+        // warming — and a straight line between two stations cannot show it.
+        const profile = [...stations, ...anchored(stations, modelled)]
+            .sort((a, b) => a.elevation - b.elevation);
+
+        const low = temperatureAt(profile, 600).temp;
+        const high = temperatureAt(profile, 800).temp;
+
+        ok(high > low, `${low} at 600 m should be under ${high} at 800 m`);
+    });
+
+    it('fades the correction out above the top station', () => {
+        const moved = anchored(stations, modelled);
+        const near = moved.find(level => level.elevation === 2200);
+
+        // The top station is 2 degrees over the model there; a level 600 m
+        // above it keeps some of that, and nothing keeps all of it.
+        const error = stations.at(-1).temp - temperatureAt(modelled, 1600).temp;
+
+        ok(Math.abs(near.temp - 4) < Math.abs(error), 'moved less than the full correction');
+        ok(near.temp !== 4, 'but moved');
+    });
+
+    it('marks only the levels above the top station as a guess', () => {
+        const moved = anchored(stations, modelled);
+
+        equal(moved.filter(level => level.aloft).map(level => level.elevation), [2200]);
+        equal(moved.filter(level => !level.aloft).map(level => level.elevation), [600, 800, 1300]);
+    });
+
+    it('drops a level a station is already standing on', () => {
+        const moved = anchored(stations, [...modelled, {elevation: 1010, temp: 5, modelled: true}]);
+
+        equal(moved.some(level => Math.abs(level.elevation - 1000) < 40), false);
+    });
+
+    it('has nothing to say without one side or the other', () => {
+        equal(anchored([], modelled), []);
+        equal(anchored(stations, []), []);
+    });
+
+    it('splits the gap between the stations into real slabs', () => {
+        // The point of the exercise. Silver Star and Cooper's are six hundred
+        // metres apart, and a single slab that deep cannot show a hundred-metre
+        // inversion at all, let alone show it breaking.
+        // Levels inside the gap between the two staged stations, which sit at
+        // 305 m and 1,524 m — the spacing the real hillside has.
+        const model = buildWindgram(SOARING(),
+            sky({levels: [[800, 14], [1200, 11], [1800, 8], [2400, 2], [3200, -6]]}));
+
+        const column = midday(model);
+
+        ok(column.segments.length > 2,
+            `${column.segments.length} slabs, where three stations alone give two`);
+
+        const under = column.segments.filter(segment => !segment.extrapolated);
+        ok(under.length > 1, 'more than one of them below the top station');
     });
 });
 
