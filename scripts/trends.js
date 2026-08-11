@@ -190,7 +190,7 @@ export class Trends {
 
             const panel = {
                 station: entry.station,
-                elevation: Number(entry.observation?.uk_hybrid?.elev),
+                elevation: this.elevationFeet(entry),
                 // Carried through for the windgram, which needs to know where
                 // the sun is to tell sunlight from cloud.
                 latitude: Number(entry.observation?.lat),
@@ -209,6 +209,30 @@ export class Trends {
         // Deliberately not awaited: the readings are already on screen, and the
         // charts fill in underneath them.
         this.loadDays();
+    }
+
+    /**
+     * How high a station stands, in feet.
+     *
+     * From the site's own configuration where it is given. Weather Underground
+     * also reports an elevation, but it is whatever the station's owner typed
+     * in when they registered it, and the whole vertical geometry of the
+     * windgram is built on these numbers — where the slabs sit, which station
+     * the parcel is released from, how the model is anchored. That is not a
+     * thing to take from a form field if the site can state it.
+     *
+     * Feet because every height in the drawing is, so that the two scales down
+     * the sides of the panel stay exact rather than round-tripped.
+     *
+     * @param {Object} entry - A station entry with its observation
+     * @returns {number} Feet above sea level, or NaN when nothing says
+     */
+    elevationFeet(entry) {
+        const stated = entry.station.coordinates?.elevation;
+
+        if (Number.isFinite(stated)) return stated / FEET;
+
+        return Number(entry.observation?.uk_hybrid?.elev);
     }
 
     /**
