@@ -2,9 +2,10 @@ import {describe, it, equal, ok, close, fixture, withFetch, response} from './ru
 import api, {RaspApi, FORECAST_LEVELS} from '../scripts/rasp-api.js';
 import {Forecast} from '../scripts/forecast.js';
 import {buildForecastWindgram} from '../scripts/rasp-model.js';
-import {sharedFrame, FEET} from '../scripts/rasp.js';
+import {sunTimes} from '../scripts/lib/solar.js';
+import {sharedFrame, flyingWindow, FEET} from '../scripts/rasp.js';
 import {Windgram} from '../scripts/windgram.js';
-import {FORECAST_STRIPS, FORECAST_CEILING, FORECAST_WINDOW, LAYOUT} from '../scripts/config/rasp.js';
+import {FORECAST_STRIPS, FORECAST_CEILING, LAYOUT} from '../scripts/config/rasp.js';
 import {
     blDepth, dewpoint, updraft, virtualHeatFlux, LCL_PER_DEGREE, DRY_ADIABAT
 } from '../scripts/lib/thermal.js';
@@ -339,21 +340,38 @@ describe('the RASP\'s own arithmetic', () => {
 });
 
 describe('building a forecast day', () => {
-    it('draws the flying day on the site\'s own clock', async () => {
+    it('runs from an hour before sunrise to an hour after sunset', async () => {
         const built = await model(0);
+        const {sunrise, sunset} = sunTimes(built.dayStart + 12 * HOUR,
+            built.latitude, built.longitude);
 
-        const start = new Date(built.dayStart + built.offset).getUTCHours();
-        const end = new Date(built.lastTime + built.offset).getUTCHours();
+        const HALF = 30 * 60 * 1000;
 
-        equal(start, FORECAST_WINDOW.startHour, 'seven in the morning, local');
-        equal(end, FORECAST_WINDOW.endHour, 'nine at night, local');
+        [built.dayStart, built.lastTime].forEach(edge =>
+            equal((edge + built.offset) % HALF, 0, `${edge} lands on a half hour`));
+
+        close(built.dayStart, sunrise - HOUR, HALF / 2 + 1);
+        close(built.lastTime, sunset + HOUR, HALF / 2 + 1);
+    });
+
+    it('draws the same window the measured day does', async () => {
+        // Both come from `flyingWindow`, so the three drawings line up on the
+        // time axis as well as on the altitude one.
+        const built = await model(0);
+        const window = flyingWindow(
+            built.dayStart - (built.dayStart + built.offset) % (24 * HOUR),
+            built.offset, built.latitude, built.longitude);
+
+        equal(built.dayStart, window.dayStart);
+        equal(built.lastTime, window.lastTime);
     });
 
     it('is one column an hour, and says so', async () => {
         const built = await model(0);
+        const hours = (built.lastTime - built.dayStart) / HOUR;
 
         equal(built.columnMs, HOUR);
-        equal(built.columns.length, FORECAST_WINDOW.endHour - FORECAST_WINDOW.startHour + 1);
+        ok(Math.abs(built.columns.length - hours) <= 1, `${built.columns.length} columns for ${hours} hours`);
     });
 
     it('draws tomorrow a day later than today', async () => {

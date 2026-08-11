@@ -200,13 +200,23 @@ export const FORECAST_COLUMN_MS = 60 * 60 * 1000;
 export const FORECAST_CEILING = 4200;
 
 /**
- * The flying day, in hours on the site's own clock.
+ * How far either side of the sun the drawings run.
  *
- * The RASP's own window. A forecast drawn from midnight to midnight spends most
- * of its width on hours nobody is asking about, and squeezes the six that
- * matter into a third of the panel.
+ * An hour before it comes up and an hour after it goes down: enough to see the
+ * inversion break in the morning and the day shut down in the evening, and
+ * nothing beyond that, because a windgram drawn from midnight to midnight
+ * spends most of its width on hours nobody is asking about.
  */
-export const FORECAST_WINDOW = {startHour: 7, endHour: 21};
+export const SUN_MARGIN_MS = 60 * 60 * 1000;
+
+/** Both ends land on a half hour, so the axis reads in round numbers. */
+export const WINDOW_STEP_MS = 30 * 60 * 1000;
+
+/**
+ * The window to fall back on inside the arctic circle, in hours on the site's
+ * own clock, where there may be no sunrise to measure from.
+ */
+export const FORECAST_WINDOW = {startHour: 5, endHour: 22};
 
 /**
  * The strips above the forecast panel.

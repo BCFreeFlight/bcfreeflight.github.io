@@ -1,9 +1,7 @@
-import {
-    FORECAST_CEILING, FORECAST_COLUMN_MS, FORECAST_WINDOW, FLOOR_BELOW_FEET
-} from './config/rasp.js';
+import {FORECAST_CEILING, FORECAST_COLUMN_MS, FLOOR_BELOW_FEET} from './config/rasp.js';
 import {isNumber} from './lib/numbers.js';
 import {binomial} from './lib/smooth.js';
-import {FEET, slab, cloudBands, isotherms} from './rasp.js';
+import {FEET, slab, cloudBands, isotherms, flyingWindow} from './rasp.js';
 import {
     blDepth, climbTop, dewpoint, updraft, virtualHeatFlux, LCL_PER_DEGREE
 } from './lib/thermal.js';
@@ -177,8 +175,11 @@ export function buildForecastWindgram(forecast, {day = 0, latitude, longitude, f
     if (!forecast.levels?.length) return null;
 
     const midnight = firstMidnight(forecast) + day * DAY;
-    const dayStart = midnight + FORECAST_WINDOW.startHour * HOUR;
-    const lastTime = midnight + FORECAST_WINDOW.endHour * HOUR;
+
+    // The same daylight window the measured drawing uses, worked out for the
+    // day being forecast rather than for today — tomorrow's sun is a couple of
+    // minutes different, and in spring or autumn a good deal more.
+    const {dayStart, lastTime} = flyingWindow(midnight, forecast.offset, latitude, longitude);
 
     const hours = forecast.times
         .map((time, index) => ({time, index}))

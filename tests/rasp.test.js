@@ -76,9 +76,14 @@ const FIVE = 5 * 60 * 1000;
  * @param {Object} options - How many readings, and what each column holds
  * @returns {Object} A day
  */
-function staged({hours = 6, ...columns} = {}) {
+function staged({hours = 6, from = 6, ...columns} = {}) {
     const count = Math.round(hours * 60 / 5);
-    const times = Array.from({length: count}, (unused, index) => MIDNIGHT + index * FIVE);
+
+    // Readings start in the morning rather than at midnight, because the
+    // drawing's window now runs from an hour before sunrise: a day staged from
+    // midnight would have most of its readings outside the frame.
+    const times = Array.from({length: count},
+        (unused, index) => MIDNIGHT + from * 60 * 60 * 1000 + index * FIVE);
 
     const values = {};
     Object.entries(columns).forEach(([key, value]) => {
@@ -537,12 +542,20 @@ describe('building the windgram', () => {
         close(model.stations[0].elevation, 1624 * FEET, 1e-6);
     });
 
-    it('stops at the last reading rather than running on to midnight', () => {
+    it('runs from an hour before sunrise to an hour after sunset', () => {
         const model = buildWindgram(real());
-        const last = model.columns.at(-1).time;
+        const {sunrise, sunset} = sunTimes(model.dayStart + 12 * 3600000,
+            model.latitude, model.longitude);
 
-        ok(last <= model.lastTime + COLUMN_MS, 'no columns past the last reading');
-        ok(model.lastTime < model.dayStart + 86400000, 'and the day is not over');
+        const HALF = 30 * 60 * 1000;
+
+        // Both ends land on a half hour of the site's own clock.
+        [model.dayStart, model.lastTime].forEach(edge =>
+            equal((edge + model.offset) % HALF, 0, `${edge} is on a half hour`));
+
+        close(model.dayStart, sunrise - 3600000, HALF / 2 + 1);
+        close(model.lastTime, sunset + 3600000, HALF / 2 + 1);
+        ok(model.lastTime - model.dayStart < 86400000, 'and it is still one day');
     });
 
     it('divides the day into columns of the configured width', () => {
@@ -667,7 +680,14 @@ describe('smoothing the profile', () => {
         const steady = profile({temp: 20}, {temp: 10});
         const spiked = profile({temp: index => index === 12 ? 24 : 20}, {temp: 10});
 
-        const rateOf = model => model.columns[2]?.segments[0]?.rate ?? null;
+        // The column the spike actually lands in, rather than a fixed index:
+        // the drawing's window starts before sunrise, so which column that is
+        // depends on the time of year.
+        const spikeAt = MIDNIGHT + 6 * 3600000 + 12 * FIVE;
+
+        const rateOf = model => model.columns.reduce((best, column) =>
+            Math.abs(column.time - spikeAt) < Math.abs(best.time - spikeAt) ? column : best,
+        model.columns[0])?.segments[0]?.rate ?? null;
 
         const before = rateOf(buildWindgram(steady));
         const after = rateOf(buildWindgram(spiked));
@@ -811,6 +831,11 @@ describe('drawing it', () => {
         const last = hits.reduce((best, hit) =>
             Number(hit.getAttribute('cx')) > Number(best.getAttribute('cx')) ? hit : best, hits[0]);
 
+        // Moved to the edge rather than trusting the last reading to be there.
+        // The window runs to an hour past sunset, so on any afternoon the
+        // right-hand end of the drawing is hours of empty frame.
+        last.setAttribute('cx', String(windgram.right - 4));
+
         windgram.showTip(last);
 
         const box = host.querySelector('.windgram-tip-box');
@@ -881,8 +906,12 @@ describe('drawing it', () => {
  * @param {Object} [options] - The levels, the cloud, and the share of sun that becomes heat
  * @returns {Object} A model in the shape the sounding service hands over
  */
-function sky({levels = [[1800, 8], [2400, 2], [3200, -6]], cloud = 40, share = 0.5, hours = 8} = {}) {
-    const times = Array.from({length: hours + 1}, (unused, index) => MIDNIGHT + index * 3600000);
+function sky({levels = [[1800, 8], [2400, 2], [3200, -6]], cloud = 40, share = 0.5,
+    from = 6, hours = 8} = {}) {
+    // Over the same hours the staged stations report, so the modelled air is
+    // actually there for the columns the assertions look at.
+    const times = Array.from({length: hours + 1},
+        (unused, index) => MIDNIGHT + (from + index) * 3600000);
 
     return {
         times,
@@ -907,7 +936,12 @@ const SOARING = () => profile({temp: 30, solar: 800}, {temp: 10});
  * @returns {Object} One column
  */
 function midday(model) {
-    return model.columns[Math.floor(model.columns.length / 2)];
+    // The middle of the part that was logged, rather than the middle of the
+    // frame: the frame now runs from before sunrise to after sunset, and a
+    // staged day fills only some of it.
+    const charted = model.columns.filter(column => column.levels.length);
+
+    return charted[Math.floor(charted.length / 2)] ?? model.columns[0];
 }
 
 describe('the air above the top station', () => {
@@ -1155,12 +1189,12 @@ describe('marking the day on the drawings', () => {
         ok(!markup.includes('chart-sun-line'), 'no marks rather than marks at midnight');
     });
 
-    it('marks only what falls inside the windgram, which stops at the last reading', () => {
-        // The staged day runs to lunchtime, so sunrise is in the frame and
-        // sunset is hours past the right-hand edge.
+    it('marks both ends of the day, which the window is built around', () => {
+        // The frame runs an hour either side of the sun, so both marks fall
+        // inside it by construction rather than by luck of the staging.
         const markup = draw(buildWindgram(SOARING(), sky()));
 
-        ok(markup.includes('windgram-sun-line'), 'sunrise is marked');
-        ok(!markup.includes('>Sunset<'), 'and a sunset off the end of the drawing is not');
+        ok(markup.includes('>Sunrise<'), 'sunrise is marked');
+        ok(markup.includes('>Sunset<'), 'and so is sunset');
     });
 });

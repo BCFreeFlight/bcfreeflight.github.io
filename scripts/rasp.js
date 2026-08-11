@@ -1,12 +1,13 @@
 import {
     COLUMN_MS, CEILING, ISOTHERM_STEP, CLOUD_DEPRESSION,
-    FLOOR_BELOW_FEET, CEILING_ABOVE_FEET, MINIMUM_DEPTH
+    FLOOR_BELOW_FEET, CEILING_ABOVE_FEET, MINIMUM_DEPTH,
+    SUN_MARGIN_MS, WINDOW_STEP_MS, FORECAST_WINDOW
 } from './config/rasp.js';
 import {LAPSE} from './config/bands.js';
 import {band, isNumber} from './lib/numbers.js';
 import {lapseRate, MINIMUM_GAP} from './lib/lapse.js';
 import {binomial} from './lib/smooth.js';
-import {sunHeight, clearSky, shadeFraction} from './lib/solar.js';
+import {sunHeight, clearSky, shadeFraction, sunTimes} from './lib/solar.js';
 import {temperatureAt, thermalTop, updraft, heatFlux, climbTop, LCL_PER_DEGREE} from './lib/thermal.js';
 import sounding from './sounding.js';
 
@@ -290,6 +291,45 @@ export function cloudBands(levels, ground, top) {
     return bands;
 }
 
+const HOUR = 60 * 60 * 1000;
+
+/**
+ * The hours every windgram on the panel is drawn across.
+ *
+ * The sun sets the window rather than the clock, because the question all three
+ * are answering is about a flying day and a flying day is bounded by daylight —
+ * which moves through the year, and moves differently at different latitudes.
+ * An hour of margin either side catches the morning inversion breaking and the
+ * evening shutting down.
+ *
+ * Rounded to the half hour on the site's own clock rather than in UTC, so the
+ * axis reads in round numbers everywhere and not only in the timezones that
+ * happen to sit a whole number of hours off it.
+ *
+ * @param {number} midnight - Local midnight of the day being drawn
+ * @param {number} offset - The site's offset from UTC, in milliseconds
+ * @param {number} latitude - Degrees north
+ * @param {number} longitude - Degrees east
+ * @returns {Object} dayStart and lastTime, in milliseconds
+ */
+export function flyingWindow(midnight, offset, latitude, longitude) {
+    // Noon, so the answer is this day's sun rather than the edge of it.
+    const {sunrise, sunset} = sunTimes(midnight + 12 * HOUR, latitude, longitude);
+
+    // No sunrise to measure from, which happens inside the arctic circle in
+    // either direction. The clock is all that is left.
+    if (!Number.isFinite(sunrise) || !Number.isFinite(sunset)) {
+        return {
+            dayStart: midnight + FORECAST_WINDOW.startHour * HOUR,
+            lastTime: midnight + FORECAST_WINDOW.endHour * HOUR
+        };
+    }
+
+    const round = at => Math.round((at + offset) / WINDOW_STEP_MS) * WINDOW_STEP_MS - offset;
+
+    return {dayStart: round(sunrise - SUN_MARGIN_MS), lastTime: round(sunset + SUN_MARGIN_MS)};
+}
+
 /**
  * The frame every windgram on the panel is drawn in.
  *
@@ -339,11 +379,20 @@ export function buildWindgram(entries, modelled = null, frame = null) {
 
     if (!charted.length) return null;
 
-    const dayStart = Math.min(...charted.map(entry => entry.day.dayStart));
+    const midnight = Math.min(...charted.map(entry => entry.day.dayStart));
 
-    // The drawing stops at the last thing anyone measured. A windgram that ran
-    // to midnight would be three quarters empty for most of the flying day.
-    const lastTime = Math.max(...charted.map(entry => entry.day.times.at(-1)));
+    // Solar position is worked out at the lowest station: the three are within
+    // ten kilometres of each other, which is a rounding error at this scale.
+    const {latitude, longitude} = charted[0];
+
+    // The same daylight window the forecasts use, so the three can be read
+    // against one another. The part of it that has not happened yet is drawn as
+    // the gap it is rather than by stopping the axis at the last reading, which
+    // used to make the measured day a different width from every other drawing
+    // and a different width again every half hour.
+    const {dayStart, lastTime} = flyingWindow(
+        midnight, charted[0].day.offset, latitude, longitude);
+
     const count = Math.max(1, Math.ceil((lastTime - dayStart) / COLUMN_MS));
 
     const aggregated = charted.map(entry => columnise(entry.day, dayStart, count));
@@ -371,10 +420,6 @@ export function buildWindgram(entries, modelled = null, frame = null) {
         floor: ground - FLOOR_BELOW_FEET * FEET,
         ceiling: Math.max(CEILING, charted.at(-1).elevationFeet * FEET + 500)
     };
-
-    // Solar position is worked out at the lowest station: the three are within
-    // ten kilometres of each other, which is a rounding error at this scale.
-    const {latitude, longitude} = charted[0];
 
     /**
      * Where a thermal is taken to start.
