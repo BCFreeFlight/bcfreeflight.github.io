@@ -410,10 +410,21 @@ a { color: var(--accent); }
    rather than floating at the top of an empty box — and it is centred to match
    it, so the two tiles read as a pair rather than two different layouts. */
 .wind-card--speed {
-    justify-content: center;
     align-items: center;
     text-align: center;
 }
+
+/* Centred in what is left under the label, rather than centring the label along
+   with it. `justify-content: center` did the latter, which pushed this tile's
+   heading thirteen pixels below its neighbour's — two tiles side by side with
+   their headings not on the same line, which is the sort of thing you see
+   immediately and cannot then unsee.
+
+   Auto margins do the rest: the label keeps its place at the top and the figure
+   takes the middle of the space beneath it, gust or no gust. */
+.wind-card--speed .wind-speed { margin-top: auto; }
+.wind-card--speed .wind-speed:last-child,
+.wind-card--speed .wind-gust { margin-bottom: auto; }
 
 /* The label stays on the left in both tiles, where the readouts below keep
    theirs. Only the figures are centred. */
