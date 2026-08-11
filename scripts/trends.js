@@ -33,6 +33,18 @@ import {shadeColumn, cloudColumn} from './sky-series.js';
 // One hour, for the daylight figure beside the sunrise and sunset.
 const HOUR = 60 * 60 * 1000;
 
+/**
+ * Which day the windgram can be showing.
+ *
+ * The first is the drawing of what the stations actually recorded; the rest are
+ * forecasts. Kept as one list because a stored choice has to be checked against
+ * it: this pill has been renamed once already, and a reader who still has the
+ * old name saved should get the default back rather than a set of buttons with
+ * none of them lit.
+ */
+const WINDGRAM_DAYS = ['current', 'today', 'tomorrow'];
+const FORECAST_DAYS = WINDGRAM_DAYS.slice(1);
+
 export class Trends {
     constructor() {
         this.panels = new Map();
@@ -43,7 +55,17 @@ export class Trends {
         this.forecasts = null;
         this.selected = readJson(STORAGE_KEYS.trendSeries, null);
         this.mode = readJson(STORAGE_KEYS.trendMode, 'split');
-        this.day = readJson(STORAGE_KEYS.windgramDay, 'live');
+        this.day = this.knownDay(readJson(STORAGE_KEYS.windgramDay, null));
+    }
+
+    /**
+     * A stored day choice, or the default when it is one this version does not
+     * recognise.
+     * @param {?string} day - Whatever was saved
+     * @returns {string} A day the drawing can actually show
+     */
+    knownDay(day) {
+        return WINDGRAM_DAYS.includes(day) ? day : WINDGRAM_DAYS[0];
     }
 
     /**
@@ -115,10 +137,16 @@ export class Trends {
      */
     renderDays() {
         const days = [
-            {key: 'live', label: 'Live', title: 'Today so far, from the stations'},
+            {key: 'current', label: 'Current', title: 'Today so far, from the stations'},
             {key: 'today', label: 'Today', title: 'Forecast for today'},
             {key: 'tomorrow', label: 'Tomorrow', title: 'Forecast for tomorrow'}
         ];
+
+        // Named twice on purpose: the buttons are written from this list and
+        // read back against WINDGRAM_DAYS, so the two must agree.
+        days.forEach(day => {
+            if (!WINDGRAM_DAYS.includes(day.key)) throw new Error(`Unknown windgram day: ${day.key}`);
+        });
 
         return `
             <div class="trend-days" role="group" aria-label="Windgram day" hidden>
@@ -511,8 +539,13 @@ export class Trends {
 
         // A panel with no forecast of its own only ever draws what was
         // measured, whichever day is chosen on the launch's panel.
-        const drawing = panel.forecast ? this.day : 'live';
-        const ahead = profile && drawing !== 'live';
+        //
+        // Tested against the days there are rather than against the one there
+        // is not, so a stored choice this version does not recognise — the
+        // pill was called something else once — falls back to the measured
+        // drawing rather than to an empty forecast.
+        const drawing = panel.forecast ? this.day : 'current';
+        const ahead = profile && FORECAST_DAYS.includes(drawing);
 
         panel.host.querySelector('.chart-host').hidden = profile;
         panel.host.querySelector('.windgram-host').hidden = !profile || ahead;
@@ -594,7 +627,7 @@ export class Trends {
         if (!day) return 'No readings logged for today yet.';
 
         if (this.mode === 'windgram') {
-            if (panel.forecast && this.day !== 'live') {
+            if (panel.forecast && FORECAST_DAYS.includes(this.day)) {
                 if (!this.forecasts) return 'Reading the forecast…';
                 if (!this.forecasts[this.day]) return 'No forecast for this day yet.';
 
