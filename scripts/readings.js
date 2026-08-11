@@ -1,5 +1,6 @@
 import weather from './weather.js';
 import {pointAt} from './config/compass.js';
+import {facingLaunch} from './lib/launch.js';
 import {fixed, isNumber} from './lib/numbers.js';
 import {pairByElevation} from './lib/lapse.js';
 
@@ -33,10 +34,17 @@ export function format(value, digits = 1) {
  * arrow should point: 180 degrees off the cardinal, because the air travels
  * away from the direction it is named for.
  *
+ * `onLaunch` answers whether that direction is one the hill can be flown in,
+ * and only a station that stands at a launch can answer it at all. Everywhere
+ * else it is null, which is not the same as false: the valley station is not
+ * reporting an unflyable wind, it is reporting a wind about a place nobody
+ * launches from.
+ *
  * @param {?Object} observation - A station observation
- * @returns {Object} cardinal, bearing, rotation, speed, gust, summary, gustSummary
+ * @param {?Object} [launch] - The station's launch window, when it has one
+ * @returns {Object} cardinal, bearing, rotation, onLaunch, speed, gust, summaries
  */
-export function wind(observation) {
+export function wind(observation, launch = null) {
     const uk = observation?.uk_hybrid ?? {};
     const degrees = observation?.winddir;
     const known = isNumber(degrees);
@@ -51,6 +59,7 @@ export function wind(observation) {
         cardinalWords: point?.words ?? null,
         bearing: known ? Math.round(degrees) : null,
         rotation: known ? degrees + 180 : 0,
+        onLaunch: facingLaunch(known ? Number(degrees) : null, launch),
         speed,
         gust,
         gusting,

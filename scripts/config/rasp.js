@@ -1,3 +1,5 @@
+import {colour} from './palette.js';
+
 /**
  * The windgram, as settings.
  *
@@ -86,7 +88,7 @@ export const STRIPS = [
         key: 'pressure',
         label: 'pres.',
         unit: 'kPa',
-        colour: '#c0392b',
+        colour: colour('strip-pressure'),
         digits: 1,
         // Pressure never sits near zero, so this strip is the one that scales
         // to its own range rather than filling from a baseline of nothing.
@@ -98,7 +100,7 @@ export const STRIPS = [
         key: 'lift',
         label: 'Lift',
         unit: 'm/s',
-        colour: '#c9b528',
+        colour: colour('strip-lift'),
         digits: 1,
         zeroed: true,
         nice: 1,
@@ -109,9 +111,10 @@ export const STRIPS = [
         key: 'cloud',
         label: 'Cloud',
         unit: '%',
-        // The same pair the chart uses for these two, so a reader moving
-        // between the drawing and the chart is not relearning them.
-        colour: '#38bdf8',
+        // The chart's own pair, by name rather than by matching hex, so a
+        // reader moving between the drawing and the chart is not relearning
+        // them and neither can be changed without the other.
+        colour: colour('series-cloud'),
         digits: 0,
         zeroed: true,
         // Always against the whole of it, so a scattered morning is not
@@ -128,7 +131,7 @@ export const STRIPS = [
         // pyranometer cannot actually tell you. See `lib/solar.js`.
         label: 'Shade',
         unit: '%',
-        colour: '#3f3f46',
+        colour: colour('series-shade'),
         digits: 0,
         zeroed: true,
         // A percentage, always drawn against the whole of it, so a thin haze is
@@ -141,7 +144,7 @@ export const STRIPS = [
         key: 'rain',
         label: 'Rain',
         unit: 'mm/hr',
-        colour: '#2ec4b6',
+        colour: colour('strip-rain'),
         digits: 2,
         zeroed: true,
         nice: 1,

@@ -1,3 +1,5 @@
+import {colour} from './palette.js';
+
 /**
  * What the numbers mean.
  *
@@ -19,15 +21,15 @@
  * @type {Object[]}
  */
 export const LAPSE = [
-    {name: 'Unstable', max: -3.0, color: '#ff0000', description: 'Strong thermals, turbulent conditions possible'},
-    {name: 'Conditional Instability', max: -2.5, color: '#ff8000', description: 'Thermals likely, some instability'},
-    {name: 'Conditional Instability', max: -2.0, color: '#ffb6ff', description: 'Weaker thermals developing'},
-    {name: 'Conditional Instability', max: -1.5, color: '#dcb7ff', description: 'Marginal thermal lift possible'},
-    {name: 'Stable', max: -1.2, color: '#fddbb0', description: 'Mostly smooth air, limited thermal activity'},
-    {name: 'Stable', max: -0.5, color: '#8080ff', description: 'Very little thermal activity, smooth flying'},
-    {name: 'Stable', max: 0.0, color: '#c0cfff', description: 'Cool and calm, no climb potential'},
-    {name: 'Inverted', max: 0.5, color: '#d3d3d3', description: 'Temperature increases with height, suppresses lift'},
-    {name: 'Strong Inversion', max: Infinity, color: '#808080', description: 'No lift, capped inversion layer'}
+    {name: 'Unstable', max: -3.0, color: colour('lapse-unstable'), description: 'Strong thermals, turbulent conditions possible'},
+    {name: 'Conditional Instability', max: -2.5, color: colour('lapse-conditional-strong'), description: 'Thermals likely, some instability'},
+    {name: 'Conditional Instability', max: -2.0, color: colour('lapse-conditional'), description: 'Weaker thermals developing'},
+    {name: 'Conditional Instability', max: -1.5, color: colour('lapse-conditional-weak'), description: 'Marginal thermal lift possible'},
+    {name: 'Stable', max: -1.2, color: colour('lapse-stable-warm'), description: 'Mostly smooth air, limited thermal activity'},
+    {name: 'Stable', max: -0.5, color: colour('lapse-stable'), description: 'Very little thermal activity, smooth flying'},
+    {name: 'Stable', max: 0.0, color: colour('lapse-stable-cool'), description: 'Cool and calm, no climb potential'},
+    {name: 'Inverted', max: 0.5, color: colour('lapse-inverted'), description: 'Temperature increases with height, suppresses lift'},
+    {name: 'Strong Inversion', max: Infinity, color: colour('lapse-capped'), description: 'No lift, capped inversion layer'}
 ];
 
 /** @type {Object[]} UV index. */
@@ -52,12 +54,12 @@ export const UV = [
  * @type {Object[]}
  */
 export const AIR_QUALITY = [
-    {name: 'Good', max: 50, color: '#00e400', description: 'Clear air, nothing to plan around'},
-    {name: 'Moderate', max: 100, color: '#ffff00', description: 'Fine for most, noticeable on a long climb out'},
-    {name: 'Unhealthy for Sensitive Groups', max: 150, color: '#ff7e00', description: 'Asthma and sensitive lungs should sit this one out'},
-    {name: 'Unhealthy', max: 200, color: '#ff0000', description: 'Everyone feels this one, so keep flights short'},
-    {name: 'Very Unhealthy', max: 300, color: '#8f3f97', description: 'Smoke thick enough to cut visibility and lift alike'},
-    {name: 'Hazardous', max: Infinity, color: '#7e0023', description: 'Not a flying day'}
+    {name: 'Good', max: 50, color: colour('aqi-good'), description: 'Clear air, nothing to plan around'},
+    {name: 'Moderate', max: 100, color: colour('aqi-moderate'), description: 'Fine for most, noticeable on a long climb out'},
+    {name: 'Unhealthy for Sensitive Groups', max: 150, color: colour('aqi-sensitive'), description: 'Asthma and sensitive lungs should sit this one out'},
+    {name: 'Unhealthy', max: 200, color: colour('aqi-unhealthy'), description: 'Everyone feels this one, so keep flights short'},
+    {name: 'Very Unhealthy', max: 300, color: colour('aqi-very-unhealthy'), description: 'Smoke thick enough to cut visibility and lift alike'},
+    {name: 'Hazardous', max: Infinity, color: colour('aqi-hazardous'), description: 'Not a flying day'}
 ];
 
 /** @type {Object[]} Sea-level equivalent pressure, in kPa. */

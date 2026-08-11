@@ -1,3 +1,4 @@
+import {launchWindow} from './lib/launch.js';
 import {
     DEFAULT_CACHE_SECONDS,
     MINIMUM_REFRESH_SECONDS,
@@ -82,13 +83,17 @@ export class Sites {
      * Fills in the parts a station may leave out.
      * @param {Object} station - A station entry from the configuration
      * @param {number} index - Its position in the site's list
-     * @returns {Object} key, name, id, isDefault and cacheSeconds
+     * @returns {Object} key, name, id, isDefault, launch and cacheSeconds
      */
     station(station, index) {
         const isDefault = station.default === true;
 
         return {
             youtube: this.youtube(station.youtube),
+            // Only a station standing at a launch has one, and most do not: the
+            // valley and the summit stations report the same site's weather
+            // without being anywhere anyone takes off from.
+            launch: launchWindow(station.launch),
             // Stable enough to use in element ids and to key state by.
             key: station.wunderground.toLowerCase(),
             name: station.name ?? station.wunderground,
