@@ -34,6 +34,7 @@ const TICK_STEP = 500;
 const TICK_CLEARANCE = 140;
 
 const HOUR = 3600000;
+const DAY = 24 * HOUR;
 
 // How big a target each barb gets. Well over the size of the mark itself,
 // because the mark is a few hairlines and the pointer is often a fingertip.
@@ -371,7 +372,16 @@ export class Windgram {
      * @returns {string} SVG markup
      */
     renderSun() {
-        const {sunrise, sunset} = sunTimes(this.model.dayStart + 12 * HOUR,
+        // Noon on the day being drawn, worked out from the clock rather than by
+        // adding twelve hours to the left-hand edge. The measured drawing starts
+        // at local midnight, where the two are the same; the forecast starts at
+        // seven in the morning, where adding twelve hours lands on the following
+        // day — and asked about the wrong day, the sunset came back an evening
+        // late and fell outside the window, so nothing was drawn at all.
+        const offset = this.model.offset ?? 0;
+        const midnight = Math.floor((this.model.dayStart + offset) / DAY) * DAY - offset;
+
+        const {sunrise, sunset} = sunTimes(midnight + 12 * HOUR,
             this.model.latitude, this.model.longitude);
 
         return [{at: sunrise, label: 'Sunrise'}, {at: sunset, label: 'Sunset'}]
