@@ -25,37 +25,25 @@ function wrap(degrees) {
 }
 
 /**
- * Reads a launch out of configuration: the window, and where it is.
+ * Reads a launch window out of configuration.
  *
  * Both bearings have to be numbers for the window to mean anything, so a
  * partial one is no window rather than half of one — a station with a typo in
  * its configuration should show an uncoloured arrow, not a confidently wrong
  * one.
  *
- * The coordinates are optional and are the launch's own, which is not the
- * station's. A weather station is sited where it can be serviced and where it
- * reads the air cleanly; the launch is where people take off from, and the two
- * are tens of metres apart at Cooper's. For anything measured — wind, air,
- * sunlight — the instrument's position is the honest one and is what the
- * observation reports. For a picture of the ground someone is about to fly off,
- * it is the launch that should be in the middle of the frame.
+ * Only the bearings. Where the launch is belongs to the station rather than to
+ * its window: every station has a position and only some of them have a
+ * direction, and a coordinate hidden inside a launch node would be a coordinate
+ * two of the three stations had nowhere to put.
  *
- * @param {?Object} launch - start and end in degrees, and optionally latitude
- *     and longitude
- * @returns {?Object} start, end, latitude and longitude, or null
+ * @param {?Object} launch - The configured window: start and end, in degrees
+ * @returns {?Object} start and end, wrapped into the circle, or null
  */
 export function launchWindow(launch) {
     if (!Number.isFinite(launch?.start) || !Number.isFinite(launch?.end)) return null;
 
-    const placed = Number.isFinite(launch.latitude) && Number.isFinite(launch.longitude);
-
-    return {
-        start: wrap(launch.start),
-        end: wrap(launch.end),
-        // Both or neither: half a coordinate is no place at all.
-        latitude: placed ? launch.latitude : null,
-        longitude: placed ? launch.longitude : null
-    };
+    return {start: wrap(launch.start), end: wrap(launch.end)};
 }
 
 /**

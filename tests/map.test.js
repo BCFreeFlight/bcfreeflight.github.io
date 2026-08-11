@@ -165,22 +165,26 @@ describe('the frame in the wind tile', () => {
         ok(markup.includes(`data-longitude="${coopers.lon}"`), markup);
     });
 
-    it('is centred on the launch instead, when the site places one', () => {
-        // The one thing on the page that is not the instrument's answer. The
-        // station is sited where it can be serviced; the launch is where people
-        // take off from, and it is the launch that should be in the frame.
-        const launch = {start: 100, end: 144, latitude: 50.2856, longitude: -118.985967};
-        const markup = index.renderWindMap(coopers, launch);
+    it('is centred on the configured coordinates instead, when there are some', () => {
+        // The one thing on the page that is not the instrument's answer. A
+        // station is sited where it can be serviced; the takeoff is where
+        // people fly from, and it is the takeoff that should be in the frame.
+        const markup = index.renderWindMap(coopers, {latitude: 50.285548, longitude: -118.984665});
 
-        ok(markup.includes('data-latitude="50.2856"'), markup);
-        ok(markup.includes('data-longitude="-118.985967"'), markup);
+        ok(markup.includes('data-latitude="50.285548"'), markup);
+        ok(markup.includes('data-longitude="-118.984665"'), markup);
         ok(!markup.includes(`data-latitude="${coopers.lat}"`), 'and not the station');
     });
 
-    it('falls back to the station when the launch names no coordinates', () => {
-        const markup = index.renderWindMap(coopers, {start: 100, end: 144, latitude: null, longitude: null});
-
-        ok(markup.includes(`data-latitude="${coopers.lat}"`), markup);
+    it('falls back to the observation when the site states no coordinates', () => {
+        // Which is the point of the fallback: a station added to the
+        // configuration without a coordinate still gets its map, from the
+        // position the API reports for it.
+        [null, undefined].forEach(configured => {
+            const markup = index.renderWindMap(coopers, configured);
+            ok(markup.includes(`data-latitude="${coopers.lat}"`), markup);
+            ok(markup.includes(`data-longitude="${coopers.lon}"`), markup);
+        });
     });
 
     it('carries the attribution the imagery is used under', () => {
