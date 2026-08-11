@@ -13,9 +13,12 @@
  * top of the lift. That height is the single number every other thermal figure
  * is built from.
  *
- * The honest caveat: a real sounding has dozens of levels, and this has three.
- * Above the highest station the profile is continued at the rate measured
- * between the top two, which is a guess, and the drawing marks it as one.
+ * The honest caveat: a real sounding has dozens of levels and the hillside has
+ * three thermometers. The gaps between them are filled with the shape of the
+ * HRDPS model, moved onto each station's own reading so that the measurements
+ * are never overwritten — see `anchored` in `rasp.js`. Above the highest
+ * station there is nothing left to anchor to and the drawing says so, in its
+ * footnotes and by knocking that air back.
  */
 
 // The dry adiabatic lapse rate, in ºC per metre. Not a measurement and not a

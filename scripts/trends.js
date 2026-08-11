@@ -54,6 +54,9 @@ export class Trends {
         this.pairs = [];
         this.forecasts = null;
         this.forecast = null;
+        // Whether the forecast is still in flight, as distinct from read and
+        // empty. Only the second is worth telling a reader about.
+        this.reading = true;
         this.selected = readJson(STORAGE_KEYS.trendSeries, null);
         this.mode = readJson(STORAGE_KEYS.trendMode, 'split');
         this.day = this.knownDay(readJson(STORAGE_KEYS.windgramDay, null));
@@ -192,9 +195,11 @@ export class Trends {
                 station: entry.station,
                 elevation: this.elevationFeet(entry),
                 // Carried through for the windgram, which needs to know where
-                // the sun is to tell sunlight from cloud.
-                latitude: Number(entry.observation?.lat),
-                longitude: Number(entry.observation?.lon),
+                // the sun is to tell sunlight from cloud, and which square of
+                // model air to read. From the site's own configuration for the
+                // same reason the elevation is: the position Weather
+                // Underground holds is the one the station's owner typed in.
+                ...this.where(entry),
                 host,
                 chart: new Chart(host.querySelector('.chart-host')),
                 windgram: new Windgram(host.querySelector('.windgram-host')),
@@ -209,6 +214,24 @@ export class Trends {
         // Deliberately not awaited: the readings are already on screen, and the
         // charts fill in underneath them.
         this.loadDays();
+    }
+
+    /**
+     * Where a station stands.
+     *
+     * The site's own coordinates where it states them, and the ones Weather
+     * Underground reports otherwise.
+     *
+     * @param {Object} entry - A station entry with its observation
+     * @returns {Object} latitude and longitude
+     */
+    where(entry) {
+        const named = entry.station.coordinates;
+
+        return {
+            latitude: named?.latitude ?? Number(entry.observation?.lat),
+            longitude: named?.longitude ?? Number(entry.observation?.lon)
+        };
     }
 
     /**
@@ -345,8 +368,8 @@ export class Trends {
 
         const forecasts = this.forecast
             ? {
-                today: buildForecastWindgram(this.forecast, {...this.where, day: 0, frame}),
-                tomorrow: buildForecastWindgram(this.forecast, {...this.where, day: 1, frame})
+                today: buildForecastWindgram(this.forecast, {...this.launchAt, day: 0, frame}),
+                tomorrow: buildForecastWindgram(this.forecast, {...this.launchAt, day: 1, frame})
             }
             : null;
 
@@ -365,16 +388,20 @@ export class Trends {
      */
     async loadForecast(panels) {
         const panel = panels.find(entry => entry.forecast);
-        if (!panel) return;
 
-        const named = panel.station.coordinates;
+        if (!panel) {
+            this.reading = false;
+            return;
+        }
 
-        this.where = {
-            latitude: named?.latitude ?? panel.latitude,
-            longitude: named?.longitude ?? panel.longitude
-        };
+        // The panel already carries the launch's own coordinates.
+        this.launchAt = {latitude: panel.latitude, longitude: panel.longitude};
 
-        this.forecast = await forecast.load(this.where.latitude, this.where.longitude);
+        try {
+            this.forecast = await forecast.load(this.launchAt.latitude, this.launchAt.longitude);
+        } finally {
+            this.reading = false;
+        }
     }
 
     /**
@@ -710,8 +737,13 @@ export class Trends {
 
         if (this.mode === 'windgram') {
             if (panel.forecast && FORECAST_DAYS.includes(this.day)) {
-                if (!this.forecasts) return 'Reading the forecast…';
-                if (!this.forecasts[this.day]) return 'No forecast for this day yet.';
+                if (this.reading) return 'Reading the forecast…';
+
+                // Read and came back with nothing — the service was unreachable
+                // or is rate-limiting us. Saying so beats "Reading…" forever.
+                if (!this.forecast) return 'The forecast service could not be reached. It will be tried again shortly.';
+
+                if (!this.forecasts?.[this.day]) return 'No forecast for this day yet.';
 
                 return 'The same column of air, forecast rather than measured, from the HRDPS '
                     + 'model the Canadian RASP is built on. Colour is stability, barbs are the '

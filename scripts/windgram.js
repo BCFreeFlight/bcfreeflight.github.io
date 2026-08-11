@@ -1173,7 +1173,7 @@ export class Windgram {
         // Air above the top station is either HRDPS or a continuation of the
         // last measured gradient, and those deserve different amounts of trust.
         const overhead = model.modelledAloft
-            ? `Air above ${top} is from the HRDPS model, not measured here`
+            ? `The air between the stations is shaped by the HRDPS model and moved onto each station's own reading; above ${top} nothing is measured at all`
             : `Air above ${top} is extrapolated from the gradient below it`;
 
         return [

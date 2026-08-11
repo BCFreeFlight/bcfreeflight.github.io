@@ -1,7 +1,7 @@
 import api, {LEVELS} from './sounding-api.js';
 import {onGrid} from './air-api.js';
 import {SOUNDING_CACHE_SECONDS, STORAGE_KEYS} from './config/defaults.js';
-import {readJson, writeJson} from './lib/storage.js';
+import {remembered, remember} from './lib/cache.js';
 import {isNumber} from './lib/numbers.js';
 import {valueAt} from './lib/series-time.js';
 
@@ -66,16 +66,19 @@ export class Sounding {
         if (!isNumber(latitude) || !isNumber(longitude)) return null;
 
         const key = STORAGE_KEYS.sounding(onGrid(latitude), onGrid(longitude));
-        const cached = readJson(key);
-        const age = (Date.now() - (cached?.fetchedAt ?? 0)) / 1000;
+        // The value, null to hold off after a failed read, or undefined to go
+        // and ask. See `lib/cache.js`.
+        const held = remembered(key, 'sounding', SOUNDING_CACHE_SECONDS);
 
-        if (cached?.sounding && age < SOUNDING_CACHE_SECONDS) return cached.sounding;
+        if (held !== undefined) return held;
 
         if (this.inFlight.has(key)) return this.inFlight.get(key);
 
         const request = this.fetchSounding(latitude, longitude)
             .then(sounding => {
-                if (sounding) writeJson(key, {fetchedAt: Date.now(), sounding});
+                // Remembered either way: a failure is an answer too, and asking
+                // again a minute later is how a rate limit becomes a rate limit.
+                remember(key, 'sounding', sounding);
                 return sounding;
             })
             .finally(() => this.inFlight.delete(key));

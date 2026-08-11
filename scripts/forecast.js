@@ -1,6 +1,6 @@
 import api, {FORECAST_LEVELS} from './rasp-api.js';
 import {FORECAST_CACHE_SECONDS, STORAGE_KEYS} from './config/defaults.js';
-import {readJson, writeJson} from './lib/storage.js';
+import {remembered, remember} from './lib/cache.js';
 import {isNumber} from './lib/numbers.js';
 import {valueAt} from './lib/series-time.js';
 
@@ -47,16 +47,19 @@ export class Forecast {
         if (!isNumber(latitude) || !isNumber(longitude)) return null;
 
         const key = STORAGE_KEYS.forecast(latitude, longitude);
-        const cached = readJson(key);
-        const age = (Date.now() - (cached?.fetchedAt ?? 0)) / 1000;
+        // The value, null to hold off after a failed read, or undefined to go
+        // and ask. See `lib/cache.js`.
+        const held = remembered(key, 'forecast', FORECAST_CACHE_SECONDS);
 
-        if (cached?.forecast && age < FORECAST_CACHE_SECONDS) return cached.forecast;
+        if (held !== undefined) return held;
 
         if (this.inFlight.has(key)) return this.inFlight.get(key);
 
         const request = this.fetchForecast(latitude, longitude)
             .then(forecast => {
-                if (forecast) writeJson(key, {fetchedAt: Date.now(), forecast});
+                // Remembered either way: a failure is an answer too, and asking
+                // again a minute later is how a rate limit becomes a rate limit.
+                remember(key, 'forecast', forecast);
                 return forecast;
             })
             .finally(() => this.inFlight.delete(key));

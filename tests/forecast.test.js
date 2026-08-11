@@ -580,6 +580,22 @@ describe('the frame the three drawings share', () => {
     });
 });
 
+
+describe('when the forecast cannot be read', () => {
+    it('says so rather than reading forever', async () => {
+        // Open-Meteo rate-limits, and a page left open through a 429 used to sit
+        // on "Reading the forecast…" for the rest of the day.
+        const {Trends} = await import('../scripts/trends.js');
+        const trends = new Trends();
+
+        equal(trends.reading, true, 'starts out in flight');
+
+        await trends.loadForecast([]);
+
+        equal(trends.reading, false, 'and stops being in flight with nothing to read');
+    });
+});
+
 describe('drawing the forecast', () => {
     /**
      * Draws a model into a host wide enough to size against.
