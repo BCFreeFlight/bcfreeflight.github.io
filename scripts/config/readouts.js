@@ -1,4 +1,6 @@
+import airQuality from '../air.js';
 import * as readings from '../readings.js';
+import {isNumber} from '../lib/numbers.js';
 
 /**
  * The secondary readings, in reading order.
@@ -11,6 +13,12 @@ import * as readings from '../readings.js';
  * `unit` may be a string or a function, because pressure has no unit to show
  * when the station does not report it, and "— kPa" reads as a measurement
  * rather than as a missing one.
+ *
+ * Every reader is handed the station's observation, the metrics derived from it,
+ * and the air over it. The last of those comes from somewhere else entirely and
+ * may be missing on its own, which is why it is a third argument rather than
+ * something folded into the observation: a station reading is what the station
+ * said, and this is not.
  *
  * @type {Object[]}
  */
@@ -64,6 +72,22 @@ export const READOUTS = [
         note: (observation, metrics) => metrics.uvIndex
             ? `${metrics.uvIndex.risk} — ${metrics.uvIndex.description}`
             : null
+    },
+    {
+        label: 'Air Quality',
+        icon: 'blur_on',
+        // Same reasoning as pressure: "— AQI" reads as a measurement rather
+        // than as a missing one.
+        unit: (observation, metrics, air) => isNumber(air?.usAqi) ? 'AQI' : '',
+        read: (observation, metrics, air) => air?.usAqi,
+        // The only tile on the page that is not a measurement taken here, so it
+        // says so: everything else is what this station's sensors recorded.
+        note: (observation, metrics, air) => {
+            const reading = airQuality.describe(air?.usAqi);
+            return reading
+                ? `${reading.name} — ${reading.description}. Modelled for the area.`
+                : null;
+        }
     },
     {
         label: 'Solar Radiation',
