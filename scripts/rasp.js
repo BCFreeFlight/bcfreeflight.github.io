@@ -9,7 +9,7 @@ import {lapseRate, MINIMUM_GAP} from './lib/lapse.js';
 import {binomial} from './lib/smooth.js';
 import {sunHeight, clearSky, shadeFraction, sunTimes} from './lib/solar.js';
 import {
-    temperatureAt, thermalTop, updraft, heatFlux, climbTop, triggerFor, LCL_PER_DEGREE
+    temperatureAt, convectiveDepth, climbFrom, heatFlux, triggerFor, pressureFrom, LCL_PER_DEGREE
 } from './lib/thermal.js';
 import sounding from './sounding.js';
 
@@ -211,24 +211,6 @@ export function slab(lower, upper) {
 
 
 /**
- * How far above the top station the model is still pulled towards it, in metres.
- *
- * The top station and the model rarely agree about the temperature at the top
- * station's own height — today Silver Star reads nearly four degrees warmer than
- * HRDPS thinks the air there is, which is an ordinary amount for a thermometer
- * on a ski hill against a 2.5 km grid square. Spliced together raw, that
- * disagreement became a four-degree step at exactly 1,662 m, and the drawing
- * rendered the step as a superadiabatic slab: a bright red band sitting on the
- * top station all afternoon, which was an artefact of the join and not a
- * property of the air.
- *
- * So the correction is carried upward and faded out. A thermometer's quarrel
- * with a model is mostly about the ground it is standing on, and that influence
- * does not reach far: a kilometre above it the model is on its own.
- */
-const OFFSET_FADE = 1000;
-
-/**
  * The modelled column, moved onto the measured one.
  *
  * The model knows the shape of the air — where the inversion sits, how deep it
@@ -241,8 +223,9 @@ const OFFSET_FADE = 1000;
  * with the model at its own height is measured, and the model's profile is
  * shifted by those disagreements — blended linearly between one station and the
  * next, so the corrected profile passes exactly through every reading and takes
- * the model's structure in between. Above the top station the last correction
- * fades out over `OFFSET_FADE`.
+ * the model's structure in between. Above the top station the last correction is
+ * held constant, which leaves the model's own gradients — and so the stability
+ * colours — untouched up there.
  *
  * The alternative, and what this replaces, was a straight line between one
  * station and the next: a 561-metre slab of a single colour, which cannot show
@@ -280,10 +263,25 @@ export function anchored(stations, modelled) {
             return below.error + share * (above.error - below.error);
         }
 
-        // Above the top station, fading to nothing.
-        const reach = Math.min(1, (height - top.elevation) / OFFSET_FADE);
-
-        return top.error * (1 - reach);
+        // Above the top station the last correction is carried upward unchanged.
+        //
+        // It used to fade out over a kilometre, on the reasoning that a
+        // thermometer's quarrel with a model is about the ground it stands on
+        // and does not reach far. That reasoning was sound and the arithmetic
+        // was not: a correction that shrinks with height *is* a lapse rate. Silver
+        // Star reads some four degrees over HRDPS, and fading four degrees away
+        // over a kilometre adds 1.2 ºC per 1000 ft of cooling to air the model
+        // said nothing of the sort about — which painted the first kilometre
+        // above the top station a band or two more unstable than the same HRDPS
+        // hour drawn on the forecast tab. The two disagreed, visibly, about air
+        // they had both read from the same numbers.
+        //
+        // A constant shift cannot do that: stability is a gradient, and adding
+        // the same number to every level leaves every gradient alone. So the air
+        // aloft now takes its colours from the model exactly, and the parcel is
+        // raced against an environment in the same frame it was released in,
+        // which is the frame its own launch thermometer defines.
+        return top.error;
     };
 
     const highest = stations.at(-1).elevation;
@@ -565,6 +563,18 @@ export function buildWindgram(entries, modelled = null, frame = null) {
 
         const profile = [...levels, ...overhead].sort((a, b) => a.elevation - b.elevation);
 
+        // The wind above the highest station, which no sensor on the hillside
+        // can report. It is the same HRDPS the forecast tabs draw their barbs
+        // from, so a climb that finishes above the top station is now flown
+        // through air the drawing has something to say about — rather than
+        // through a blank space above the last barb.
+        //
+        // Only above. Between the stations there are three anemometers, and a
+        // 2.5 km grid square has nothing to add to a reading taken on the spot.
+        const aloft = overhead.filter(level => level.aloft
+            && level.elevation < ceiling
+            && isNumber(level.windSpeed) && isNumber(level.windDir));
+
         const segments = [];
         for (let level = 0; level < profile.length - 1; level++) {
             if (profile[level].elevation >= ceiling) break;
@@ -611,28 +621,52 @@ export function buildWindgram(entries, modelled = null, frame = null) {
 
         const sunlit = irradiance !== null && irradiance >= THERMAL_SUN;
 
-        // The profile from launch upward, measured as far as the stations reach
-        // and modelled above them. Anything below launch is drawn, but it is not
-        // what the bubble climbs through.
-        const climbing = profile.filter(level => level.elevation >= launchElevation - 1);
-        const surface = climbing[0] ?? profile[0];
+        // Where the bubble is released, and what the air is doing there. Not the
+        // lowest station: see `launch` above. Anything below launch is drawn,
+        // but it is not what the parcel climbs through.
+        const release = launchElevation;
+        const surfaceTemp = temperatureAt(profile, release)?.temp ?? null;
 
-        // The allowance for the unmeasured superadiabatic layer at the ground,
-        // scaled by how hard the sun is actually driving it.
-        const top = sunlit
-            ? thermalTop(climbing, ceiling, {trigger: triggerFor(irradiance)})
-            : null;
+        // The depth of the convective layer, by the RASP's own parcel method —
+        // the same function the forecast calls, given this drawing's inputs
+        // instead of the model's. Zero when the sun is not driving anything:
+        // the arithmetic has no idea what time it is, and an unstable profile
+        // at four in the morning is not a thermal, it is a cold night.
+        const depth = irradiance === null
+            ? null
+            : sunlit
+                ? convectiveDepth(profile, {
+                    release,
+                    surfaceTemp,
+                    // The allowance for the unmeasured superadiabatic layer at
+                    // the ground, scaled by how hard the sun is driving it. The
+                    // forecast needs none: see `TRIGGER_OFFSET`.
+                    trigger: triggerFor(irradiance),
+                    ceiling
+                })
+                : 0;
 
         // How much of that sunlight becomes heat in the air. The sunlight is
         // always the station's own pyranometer; only the share is modelled,
         // because how wet the ground is is not something a weather station can
         // report and it is what decides the strength of the day.
-        const flux = heatFlux(irradiance, sounding.shareAt(modelled, time));
+        //
+        // Zero rather than nothing once the sun is down: the hour is answered.
+        const flux = irradiance === null
+            ? null
+            : heatFlux(irradiance, sounding.shareAt(modelled, time)) ?? 0;
 
-        // Cloud base as a pilot works it out: the spread between temperature
-        // and dew point at the surface, times the rate the two converge.
-        const base = surface && isNumber(surface.dewpt)
-            ? surface.elevation + LCL_PER_DEGREE * Math.max(0, surface.temp - surface.dewpt)
+        // Cloud base as a pilot works it out, and as the RASP does: the spread
+        // between temperature and dew point where the parcel starts, times the
+        // rate the two converge.
+        const dewpoints = levels
+            .filter(level => isNumber(level.dewpt))
+            .map(level => ({elevation: level.elevation, temp: level.dewpt}));
+
+        const releaseDew = dewpoints.length ? temperatureAt(dewpoints, release)?.temp ?? null : null;
+
+        const base = surfaceTemp !== null && releaseDew !== null
+            ? release + LCL_PER_DEGREE * Math.max(0, surfaceTemp - releaseDew)
             : null;
 
         const rain = aggregated.map(station => station[i].precipRate).filter(isNumber);
@@ -640,15 +674,23 @@ export function buildWindgram(entries, modelled = null, frame = null) {
 
         columns.push({
             time,
-            levels,
+            // Measured first and modelled after, in ascending order either way:
+            // everything that reads a column expects the lowest level first, and
+            // the modelled ones all sit above the highest measured one.
+            levels: [...levels, ...aloft],
             profile,
             segments,
             above,
-            // The climb figures are all worked out from the thermal top, and
-            // only once it has been smoothed. See below.
-            thermalTop: top,
+            // The climb figures are all worked out from the depth, and only
+            // once it has been smoothed. See below.
+            depth,
             flux,
-            surface,
+            release,
+            surfaceTemp,
+            // The pressure the parcel leaves the ground at, read off the
+            // model's own levels. Not the barometer strip below, which is
+            // whichever station has one and may be reporting sea level.
+            releasePressure: pressureFrom(overhead, release),
             cloudBase: base !== null && base < ceiling ? base : null,
             shade,
             cloud: sounding.cloudAt(modelled, time),
@@ -667,42 +709,38 @@ export function buildWindgram(entries, modelled = null, frame = null) {
     }
 
     // Smoothed before anything is derived from them, exactly as the forecast
-    // does it. Both are crossings — the height where the parcel curve meets the
-    // sounding, and the height where the temperature meets the dew point — and
-    // between two half-hourly columns the stations can disagree by a tenth of a
-    // degree, which is nothing as a temperature and several hundred metres as a
-    // thermal top.
+    // does it — the same two fields, in the same order, for the same reason.
+    // Both are crossings — the height where the parcel curve meets the sounding,
+    // and the height where the temperature meets the dew point — and between two
+    // half-hourly columns the stations can disagree by a tenth of a degree,
+    // which is nothing as a temperature and several hundred metres as a layer.
     //
-    // The order matters and used to be wrong: the climb rate and the climb
-    // height were worked out from the raw thermal top while the *line* drawn
-    // for that top was smoothed, so the strip and the line were answering from
-    // two different numbers.
-    ['thermalTop', 'cloudBase'].forEach(field => {
+    // The depth is what gets smoothed rather than the thermal top, because the
+    // depth is the input all three climb figures are built from. Smoothing them
+    // separately let the climb line drift above the cloud base it is supposed
+    // to stop at, since two series smoothed apart do not keep the order between
+    // them.
+    ['depth', 'cloudBase'].forEach(field => {
         const smoothed = binomial(columns.map(column => column[field]));
         columns.forEach((column, index) => { column[field] = smoothed[index]; });
     });
 
     columns.forEach(column => {
-        const {thermalTop: top, flux, surface, cloudBase} = column;
-
-        column.lift = top !== null && flux !== null
-            ? updraft(top - surface.elevation, flux, surface.temp, surface.elevation)
-            : null;
-
-        // How high a wing still climbs, which is lower than where the bubble
-        // stops — and lower again when there is cloud in the way, because that
-        // is where the climb ends whatever the air is doing above it.
-        const usable = top !== null && column.lift
-            ? climbTop(top, surface.elevation, column.lift)
-            : null;
-
-        column.climbTop = usable !== null && cloudBase !== null
-            ? Math.min(usable, cloudBase)
-            : usable;
+        // One derivation, shared with the forecast: see `climbFrom`.
+        Object.assign(column, climbFrom(column.depth, {
+            release: column.release,
+            surfaceTemp: column.surfaceTemp,
+            flux: column.flux,
+            pressure: column.releasePressure,
+            cloudBase: column.cloudBase
+        }));
 
         // Carried only so far as the derivation; nothing draws them.
+        delete column.depth;
         delete column.flux;
-        delete column.surface;
+        delete column.release;
+        delete column.surfaceTemp;
+        delete column.releasePressure;
     });
 
     return {

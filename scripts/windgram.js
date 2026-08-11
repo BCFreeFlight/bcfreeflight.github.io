@@ -858,11 +858,16 @@ export class Windgram {
     }
 
     /**
-     * A row of barbs at each station's own height.
+     * A row of barbs at each station's own height, and at each modelled level
+     * above the highest of them.
      *
-     * Only three rows, because only three heights were measured. Filling the
-     * panel with interpolated barbs would look more like the forecast it is
-     * modelled on and mean considerably less.
+     * Nothing is interpolated between the stations: three anemometers are three
+     * rows, and a row invented halfway up would look like the forecast it is
+     * modelled on and mean considerably less. Above the top station there is no
+     * reading to invent against, only a model — the same HRDPS the forecast tabs
+     * draw — and blank air over the hill was worse than the model's answer to
+     * it, because that is exactly where a climb finishes. Those barbs are drawn
+     * knocked back, like the stability they sit in.
      *
      * White, as on the RASP — but drawn twice, because the RASP can afford
      * plain white and this cannot. Its background is saturated model output
@@ -891,7 +896,12 @@ export class Windgram {
                 // Lifted clear of the station's own rule and name. The reading
                 // still belongs to the station's true height, which is where
                 // that rule is drawn.
-                const y = this.y(level.elevation + lift);
+                //
+                // A modelled level has no rule to clear and no name printed on
+                // it, so it is drawn at the height the model gave — lifting it
+                // would put a pressure level half a thousand feet off its own
+                // geopotential height for no reason.
+                const y = this.y(level.elevation + (level.aloft ? 0 : lift));
 
                 // A level above the ceiling, or below the floor, is air this
                 // panel does not draw. The clip would hide it either way, but
@@ -909,6 +919,11 @@ export class Windgram {
                     y: y.toFixed(1),
                     speed: level.windSpeed.toFixed(1),
                     point: level.windDir === null ? '' : pointAt(level.windDir).abbr,
+                    // Air nothing is standing in, so the barb is knocked back to
+                    // the same degree the stability above the top station is.
+                    // The shape of the mark is the reading; the weight of it is
+                    // how much of a reading it is.
+                    aloft: Boolean(level.aloft),
                     // A measured level belongs to a station and is named for it;
                     // a modelled one is a pressure level and names itself.
                     station: level.label ?? station?.shortName ?? station?.name ?? ''
@@ -936,12 +951,17 @@ export class Windgram {
          * @param {string} kind - The class suffix, halo or nothing
          * @returns {string} Every mark drawn in one pass
          */
-        const pass = kind => marks.map(mark => mark.calm
-            ? CALM_RINGS.map(radius =>
-                `<circle class="windgram-calm${kind}" cx="${mark.x}" cy="${mark.y}" r="${radius}"></circle>`
-            ).join('')
-            : `<path class="windgram-barb${kind}" d="${mark.d}" transform="${mark.transform}"></path>`
-        ).join('');
+        const pass = kind => marks.map(mark => {
+            const faded = mark.aloft ? ` opacity="${EXTRAPOLATED_OPACITY}"` : '';
+
+            return mark.calm
+                ? CALM_RINGS.map(radius =>
+                    `<circle class="windgram-calm${kind}" cx="${mark.x}" cy="${mark.y}"
+                             r="${radius}"${faded}></circle>`
+                ).join('')
+                : `<path class="windgram-barb${kind}" d="${mark.d}"
+                         transform="${mark.transform}"${faded}></path>`;
+        }).join('');
 
         // A barb is a few thin strokes, which is far too small a target for a
         // finger. Each gets an invisible disc over it instead, laid last so it
@@ -1173,7 +1193,7 @@ export class Windgram {
         // Air above the top station is either HRDPS or a continuation of the
         // last measured gradient, and those deserve different amounts of trust.
         const overhead = model.modelledAloft
-            ? `The air between the stations is shaped by the HRDPS model and moved onto each station's own reading; above ${top} nothing is measured at all`
+            ? `The air between the stations is shaped by the HRDPS model and moved onto each station's own reading; above ${top} both the air and the faded barbs in it are the model's, measured by nothing`
             : `Air above ${top} is extrapolated from the gradient below it`;
 
         return [
@@ -1291,7 +1311,9 @@ export class Windgram {
         // same way the panel does.
         const winds = [...column.levels].reverse().map(level => {
             const station = this.model.stations.find(entry => entry.key === level.key);
-            const name = station?.shortName ?? station?.name ?? '';
+            // A measured level belongs to a station and is named for it; a
+            // modelled one is a pressure level and names itself.
+            const name = level.label ?? station?.shortName ?? station?.name ?? '';
 
             if (level.windSpeed === null) return `${name} —`;
 
