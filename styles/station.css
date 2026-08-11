@@ -874,6 +874,17 @@ a { color: var(--accent); }
     stroke-linecap: round;
 }
 
+/* The usable climb, under the thermal top. Same blue so the two read as one
+   pair, dashed and thinner so it is clearly the secondary of the two. */
+.windgram-climb-line {
+    fill: none;
+    stroke: #1d4ed8;
+    stroke-width: 1.6;
+    stroke-dasharray: 6 4;
+    stroke-linecap: round;
+    opacity: .75;
+}
+
 .windgram-glider {
     font-family: "Material Symbols Outlined", sans-serif;
     font-variation-settings: "FILL" 1, "wght" 500, "GRAD" 0, "opsz" 20;

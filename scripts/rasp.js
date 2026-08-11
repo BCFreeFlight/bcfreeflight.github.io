@@ -3,7 +3,8 @@ import {LAPSE} from './config/bands.js';
 import {band, isNumber} from './lib/numbers.js';
 import {lapseRate, MINIMUM_GAP} from './lib/lapse.js';
 import {sunHeight, clearSky, shadeFraction} from './lib/solar.js';
-import {temperatureAt, thermalTop, updraft} from './lib/thermal.js';
+import {temperatureAt, thermalTop, updraft, heatFlux, climbTop} from './lib/thermal.js';
+import sounding from './sounding.js';
 
 /**
  * The day, as a column of air.
@@ -294,9 +295,10 @@ function cloudBands(levels, ground, top) {
  * Builds the whole drawing's model from the days already read for each station.
  *
  * @param {Object[]} entries - {station, elevationFeet, latitude, longitude, day}
+ * @param {?Object} [modelled] - The modelled air above the stations, when it is known
  * @returns {?Object} The model, or null when there is nothing to draw
  */
-export function buildWindgram(entries) {
+export function buildWindgram(entries, modelled = null) {
     const charted = entries
         .filter(entry => entry.day?.times?.length && Number.isFinite(entry.elevationFeet))
         .sort((a, b) => a.elevationFeet - b.elevationFeet);
@@ -369,22 +371,40 @@ export function buildWindgram(entries) {
             }))
             .filter(level => isNumber(level.temp));
 
+        // The measured column, continued upward by the model. Only above the
+        // highest station that is reporting: everything below it is air a
+        // thermometer is standing in, and a reading beats a forecast.
+        const overhead = levels.length
+            ? sounding.profileAt(modelled, time, levels.at(-1).elevation)
+                .map(level => ({...level, elevationFeet: level.elevation / FEET}))
+            : [];
+
+        const profile = [...levels, ...overhead];
+
         const segments = [];
-        for (let level = 0; level < levels.length - 1; level++) {
-            const measured = slab(levels[level], levels[level + 1]);
+        for (let level = 0; level < profile.length - 1; level++) {
+            if (profile[level].elevation >= ceiling) break;
+
+            const measured = slab(profile[level], profile[level + 1]);
             if (!measured) continue;
 
             segments.push({
-                from: levels[level].elevation,
-                to: levels[level + 1].elevation,
+                from: profile[level].elevation,
+                // Clipped, so a model level well above the drawing does not
+                // stretch the last band off the top of it.
+                to: Math.min(profile[level + 1].elevation, ceiling),
+                // Drawn knocked back either way: the reader is being told this
+                // part was not measured here, and by what.
+                extrapolated: Boolean(profile[level + 1].modelled),
+                modelled: Boolean(profile[level + 1].modelled),
                 ...measured
             });
         }
 
-        // Above the top station the last measured gradient is all we have, so
-        // it is carried upward — separately, so it can be drawn as the guess it
-        // is rather than as another measurement.
-        const above = segments.length
+        // With no model to continue it, the last measured gradient is all there
+        // is, so it is carried upward the way it always was — separately, so it
+        // can be drawn as the guess it is rather than as another measurement.
+        const above = !overhead.length && segments.length
             ? {
                 from: levels.at(-1).elevation,
                 to: ceiling,
@@ -405,15 +425,22 @@ export function buildWindgram(entries) {
 
         const sunlit = irradiance !== null && irradiance >= THERMAL_SUN;
 
-        // The profile from launch upward. Anything below it is drawn, but it is
-        // not what the bubble climbs through.
-        const aloft = levels.filter(level => level.elevation >= launchElevation - 1);
-        const surface = aloft[0] ?? levels[0];
+        // The profile from launch upward, measured as far as the stations reach
+        // and modelled above them. Anything below launch is drawn, but it is not
+        // what the bubble climbs through.
+        const climbing = profile.filter(level => level.elevation >= launchElevation - 1);
+        const surface = climbing[0] ?? profile[0];
 
-        const top = sunlit ? thermalTop(aloft, ceiling) : null;
+        const top = sunlit ? thermalTop(climbing, ceiling) : null;
 
-        const lift = top !== null
-            ? updraft(top - surface.elevation, irradiance, surface.temp)
+        // How much of that sunlight becomes heat in the air. The sunlight is
+        // always the station's own pyranometer; only the share is modelled,
+        // because how wet the ground is is not something a weather station can
+        // report and it is what decides the strength of the day.
+        const flux = heatFlux(irradiance, sounding.shareAt(modelled, time));
+
+        const lift = top !== null && flux !== null
+            ? updraft(top - surface.elevation, flux, surface.temp, surface.elevation)
             : null;
 
         // Cloud base as a pilot works it out: the spread between temperature
@@ -422,17 +449,31 @@ export function buildWindgram(entries) {
             ? surface.elevation + LCL_PER_DEGREE * Math.max(0, surface.temp - surface.dewpt)
             : null;
 
+        // How high a wing still climbs, which is lower than where the bubble
+        // stops — and lower again when there is cloud in the way, because that
+        // is where the climb ends whatever the air is doing above it.
+        const usable = top !== null && lift !== null
+            ? climbTop(top, surface.elevation, lift)
+            : null;
+
+        const climbCeiling = usable !== null && base !== null
+            ? Math.min(usable, base)
+            : usable;
+
         const rain = aggregated.map(station => station[i].precipRate).filter(isNumber);
         const pressure = pressures && isNumber(pressures[i].pressure) ? pressures[i].pressure : null;
 
         columns.push({
             time,
             levels,
+            profile,
             segments,
             above,
             thermalTop: top,
+            climbTop: climbCeiling,
             cloudBase: base !== null && base < ceiling ? base : null,
             shade,
+            cloud: sounding.cloudAt(modelled, time),
             lift,
             pressure,
             rain: rain.length ? Math.max(...rain) : null,
@@ -457,6 +498,10 @@ export function buildWindgram(entries) {
         })),
         latitude,
         longitude,
+        // Whether the air above the top station came from the model or from
+        // continuing the last measured gradient. The footnotes say which, since
+        // the two deserve different amounts of trust.
+        modelledAloft: columns.some(column => column.segments.some(segment => segment.modelled)),
         columns,
         isotherms: isotherms(columns, ceiling)
     };
@@ -474,14 +519,14 @@ export function buildWindgram(entries) {
  * @returns {Object[]} One {value, runs} per contour
  */
 function isotherms(columns, ceiling) {
-    const temps = columns.flatMap(column => column.levels.map(level => level.temp));
+    const temps = columns.flatMap(column => (column.profile ?? column.levels).map(level => level.temp));
     if (temps.length < 2) return [];
 
     // The contours have to cover the extrapolated air too, which is colder than
     // anything measured, so the range is taken from the top of the drawing
     // rather than from the readings alone.
     const coldest = Math.min(...columns.map(column => {
-        const level = column.levels.at(-1);
+        const level = (column.profile ?? column.levels).at(-1);
         const above = column.above;
         if (!level || !above) return level?.temp ?? Infinity;
 
@@ -499,7 +544,7 @@ function isotherms(columns, ceiling) {
         let run = [];
 
         columns.forEach(column => {
-            const height = heightAtTemperature(column.levels, value, ceiling);
+            const height = heightAtTemperature(column.profile ?? column.levels, value, ceiling);
 
             if (height === null) {
                 if (run.length > 1) runs.push(run);

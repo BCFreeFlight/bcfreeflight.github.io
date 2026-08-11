@@ -308,6 +308,7 @@ export class Windgram {
                 ${this.renderTerrain()}
                 ${this.renderIsotherms()}
                 ${this.renderThermalTop()}
+                ${this.renderClimbTop()}
                 ${this.renderCloudBase()}
                 ${this.renderBarbs()}
             </g>
@@ -490,6 +491,47 @@ export class Windgram {
             <path class="windgram-thermal-line" d="${d}"></path>
             ${gliders}
         </g>`;
+    }
+
+    /**
+     * How high a wing can actually climb to.
+     *
+     * A thermal is not one speed all the way up: it peaks about a quarter of the
+     * way through the layer and dies out well below the top, so the height where
+     * the air stops beating a glider's own sink is meaningfully lower than the
+     * height where the bubble finally stops. The line above is where the air
+     * gives up; this one is where you would.
+     *
+     * Drawn dashed and lighter, because it sits under a line that is already
+     * there and the pair only reads if one of them is clearly secondary.
+     *
+     * @returns {string} SVG markup
+     */
+    renderClimbTop() {
+        const runs = [];
+        let run = [];
+
+        // Broken into runs so an hour with no usable climb leaves a gap rather
+        // than a line ruled optimistically across it.
+        this.model.columns.forEach(column => {
+            if (column.climbTop === null || column.climbTop === undefined) {
+                if (run.length > 1) runs.push(run);
+                run = [];
+                return;
+            }
+
+            run.push({x: this.x(column.time), y: this.y(column.climbTop)});
+        });
+
+        if (run.length > 1) runs.push(run);
+        if (!runs.length) return '';
+
+        const paths = runs.map(points => `<path class="windgram-climb-line" d="${
+            points.map((point, index) =>
+                `${index ? 'L' : 'M'}${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join('')
+        }"></path>`).join('');
+
+        return `<g class="windgram-climb">${paths}</g>`;
     }
 
     /**
@@ -756,10 +798,17 @@ export class Windgram {
         const launch = this.model.launch?.shortName ?? 'launch';
         const top = this.model.stations.at(-1)?.shortName ?? 'the top station';
 
+        // Air above the top station is either HRDPS or a continuation of the
+        // last measured gradient, and those deserve different amounts of trust.
+        const overhead = this.model.modelledAloft
+            ? `Air above ${top} is from the HRDPS model, not measured here`
+            : `Air above ${top} is extrapolated from the gradient below it`;
+
         const sentences = [
             `Local lapse rate in ºC per 1000 ft. Wind barbs in km/h. Time${zone}.`,
             'Blue hatching is air within half a degree of its dew point; grey hatching is air no station was reporting from. Barbs sit 500 ft above their station so they clear its line.',
-            `* Shade is how much of the clear-sky sunlight is missing — cloud, haze, smoke or terrain. Lift is worked out from that and the measured profile, not sensed, with thermals released from ${launch}. Air above ${top} is extrapolated.`
+            'The solid line is where a thermal stops climbing; the dashed line under it is where the climb drops below a glider\'s own sink, which is the height worth flying to.',
+            `* Shade is measured — how much of the clear-sky sunlight is missing to cloud, haze, smoke or terrain. Cloud is modelled. Lift is worked out from the measured sunlight and profile, with thermals released from ${launch}. ${overhead}.`
         ];
 
         // Wrapped on a character estimate rather than on measured text: the
@@ -912,7 +961,13 @@ export class Windgram {
             column.thermalTop === null
                 ? 'No thermal'
                 : `Top ${Math.round(column.thermalTop).toLocaleString()} m`,
+            column.climbTop === null || column.climbTop === undefined
+                ? null
+                : `Climb to ${Math.round(column.climbTop).toLocaleString()} m`,
             column.lift === null ? null : `Lift ${column.lift.toFixed(1)} m/s`,
+            column.cloud === null || column.cloud === undefined
+                ? null
+                : `Cloud ${Math.round(column.cloud)}%`,
             column.shade === null ? null : `Shade ${Math.round(column.shade * 100)}%`,
             column.cloudBase === null ? null : `Base ${Math.round(column.cloudBase).toLocaleString()} m`,
             ...winds

@@ -24,13 +24,76 @@ export const DRY_ADIABAT = 0.0098;
 
 const GRAVITY = 9.81;
 const SPECIFIC_HEAT = 1005;
-const AIR_DENSITY = 1.1;
 
-// The share of the sunlight landing on the ground that comes back as heat in
-// the air rather than going into evaporation, soil, or straight back out as
-// reflection. Forested mountain terrain sits near the bottom of the usual
-// range; this is the one number here a local pilot might reasonably retune.
+// Standard atmosphere, for working out the pressure at a height when no
+// barometer reports one. Two of the three stations have no barometer, and the
+// two that do disagree about whether they mean station or sea-level pressure,
+// so a table is more trustworthy here than a sensor.
+const SEA_LEVEL_PRESSURE = 101325;
+const GAS_CONSTANT = 287.05;
+
+/**
+ * The fallback share of sunlight that comes back as heat in the air rather than
+ * going into evaporation, soil, or straight back out as reflection.
+ *
+ * Only used when nothing better is available. A model that carries its own
+ * surface energy balance knows this split for the day in question — whether the
+ * ground is wet, what is growing on it, how long since it rained — and that
+ * varies far more than a single constant can express. Forested mountain terrain
+ * sits near the bottom of the usual range, which is where this sits.
+ */
 export const HEAT_FRACTION = 0.2;
+
+/**
+ * How fast a glider sinks through still air, in metres per second.
+ *
+ * Not a property of the weather at all: it is what turns "the air here is going
+ * up at this rate" into "a wing here would climb", which is the question a pilot
+ * is actually asking. One metre per second is what the Canadian RASP uses, and
+ * keeping the same figure is what lets its climb height and this one be read as
+ * the same number.
+ */
+export const GLIDER_SINK = 1.0;
+
+/**
+ * Air pressure at a height, from the standard atmosphere.
+ * @param {number} elevation - Metres above sea level
+ * @returns {number} Pressure in pascals
+ */
+export function pressureAt(elevation) {
+    return SEA_LEVEL_PRESSURE * Math.pow(1 - 2.25577e-5 * elevation, 5.25588);
+}
+
+/**
+ * How dense the air is where the thermal starts.
+ *
+ * Worth computing rather than assuming: a thermal at Cooper's leaves the ground
+ * three and a half thousand feet up, where the air is nearly a tenth thinner
+ * than the sea-level figure a constant would carry.
+ *
+ * @param {number} elevation - Metres above sea level
+ * @param {number} temp - Air temperature in ºC
+ * @returns {number} Density in kg/m³
+ */
+export function airDensity(elevation, temp) {
+    return pressureAt(elevation) / (GAS_CONSTANT * (temp + 273.15));
+}
+
+/**
+ * Potential temperature: what this air would be if brought to 1000 mb.
+ *
+ * The buoyancy term wants the temperature of the air as a body rather than as
+ * read on a thermometer partway up a mountain, which is what this converts it
+ * to. Small — three percent at launch height — but free once the pressure is
+ * known.
+ *
+ * @param {number} elevation - Metres above sea level
+ * @param {number} temp - Air temperature in ºC
+ * @returns {number} Potential temperature in kelvin
+ */
+export function potentialTemperature(elevation, temp) {
+    return (temp + 273.15) * Math.pow(100000 / pressureAt(elevation), 0.28571);
+}
 
 // A bubble that never gets more than this far off the deck is not a thermal,
 // it is measurement noise between two stations.
@@ -138,16 +201,86 @@ export function thermalTop(levels, ceiling, {trigger = TRIGGER_OFFSET, step = 25
  * whole boundary layer, so the core of a good thermal will beat it and the sink
  * between them will not — which is the right number for a strip on a chart.
  *
+ * Takes the heat actually going into the air rather than the sunlight landing on
+ * the ground, because how much of the one becomes the other is a property of the
+ * day and not a constant. `heatFlux` below turns one into the other.
+ *
  * @param {number} depth - Depth of the convective layer, in metres
- * @param {number} irradiance - Sunlight reaching the ground, in W/m²
+ * @param {number} flux - Heat entering the air, in W/m²
  * @param {number} temp - Surface temperature, in ºC
+ * @param {number} [elevation=0] - Height of that surface, in metres
  * @returns {number} Metres per second
  */
-export function updraft(depth, irradiance, temp) {
-    if (!(depth > 0) || !(irradiance > 0)) return 0;
+export function updraft(depth, flux, temp, elevation = 0) {
+    if (!(depth > 0) || !(flux > 0)) return 0;
 
-    const flux = HEAT_FRACTION * irradiance;
-    const kelvin = temp + 273.15;
+    const density = airDensity(elevation, temp);
+    const theta = potentialTemperature(elevation, temp);
 
-    return Math.cbrt((GRAVITY / kelvin) * (flux / (AIR_DENSITY * SPECIFIC_HEAT)) * depth);
+    return Math.cbrt((GRAVITY / theta) * (flux / (density * SPECIFIC_HEAT)) * depth);
+}
+
+/**
+ * The heat going into the air, from the sunlight landing on the ground.
+ *
+ * The share is the part worth getting from somewhere better than a constant:
+ * on dry ground almost all of it heats the air, and on wet ground most of it
+ * goes into evaporating water and never drives a thermal at all. The sunlight
+ * itself should always be the measured one — a pyranometer at launch knows
+ * about today's smoke and today's cirrus, and a model an hour old does not.
+ *
+ * @param {number} irradiance - Sunlight reaching the ground, in W/m²
+ * @param {?number} [share] - The fraction that becomes heat, when it is known
+ * @returns {?number} Heat flux in W/m², or null without sunlight to convert
+ */
+export function heatFlux(irradiance, share = null) {
+    if (!(irradiance > 0)) return null;
+
+    const fraction = share === null ? HEAT_FRACTION : share;
+
+    return fraction * irradiance;
+}
+
+/**
+ * How high a glider can still climb.
+ *
+ * A thermal is not one speed all the way up. It accelerates off the deck, peaks
+ * around a quarter of the way up the layer, and dies out below the top — so the
+ * height where the air stops going up faster than a wing goes down is well
+ * beneath the height where the bubble finally runs out of buoyancy. That lower
+ * height is the one worth flying to, and it is what the RASP calls hcrit.
+ *
+ * The profile is the RASP's own: four times the layer mean, shaped by the cube
+ * root of the height fraction and falling away linearly above it, which puts
+ * peak climb at about 1.8 times the mean and zero at nine tenths of the depth.
+ *
+ * @param {number} top - Top of the convective layer, in metres above sea level
+ * @param {number} ground - Where the thermal starts, in metres above sea level
+ * @param {number} wstar - The layer's mean climb rate, in m/s
+ * @param {Object} [options] - sink rate in m/s, and the height tolerance
+ * @returns {?number} Metres above sea level, or null when nothing climbs
+ */
+export function climbTop(top, ground, wstar, {sink = GLIDER_SINK, tolerance = 10} = {}) {
+    const depth = top - ground;
+
+    // The same floor the buoyancy calculation uses: a layer this shallow is
+    // noise between two thermometers rather than a thermal.
+    if (!(depth > MINIMUM_DEPTH) || !(wstar > 0)) return null;
+
+    const climb = height => wstar * 4 * Math.cbrt(height / depth) * (1 - 1.1 * (height / depth));
+
+    // Searched above the peak, so the answer is the top of the usable climb
+    // rather than the point on the way up where it first got good.
+    let low = 0.25 * depth;
+    let high = depth;
+
+    // Never beats the wing, even at its best. There is no height to report.
+    if (climb(low) <= sink) return null;
+
+    while (high - low > tolerance) {
+        const middle = (low + high) / 2;
+        if (climb(middle) > sink) low = middle; else high = middle;
+    }
+
+    return ground + low;
 }

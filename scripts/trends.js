@@ -1,5 +1,6 @@
 import history from './history.js';
 import air from './air.js';
+import sounding from './sounding.js';
 import {SERIES, AIR_SERIES} from './config/series.js';
 import {STORAGE_KEYS} from './config/defaults.js';
 import {readJson, writeJson} from './lib/storage.js';
@@ -29,6 +30,7 @@ export class Trends {
         this.panels = new Map();
         this.days = new Map();
         this.airs = new Map();
+        this.aloft = new Map();
         this.pairs = [];
         this.selected = readJson(STORAGE_KEYS.trendSeries, null);
         this.mode = readJson(STORAGE_KEYS.trendMode, 'split');
@@ -150,6 +152,11 @@ export class Trends {
             // panels in the same grid square share the one request.
             const overhead = await air.load(panel.latitude, panel.longitude);
             if (overhead) this.airs.set(panel.station.key, overhead);
+
+            // The air above the top of the hill, which no station is standing
+            // in. Only the windgram uses it, and only above the last station.
+            const modelled = await sounding.load(panel.latitude, panel.longitude);
+            if (modelled) this.aloft.set(panel.station.key, modelled);
         }));
 
         this.pairs = lapsePairs(panels.map(panel => ({
@@ -161,13 +168,18 @@ export class Trends {
         // Built once from every station, because a windgram is a slice through
         // the whole hillside rather than a property of any one tab. Every
         // panel is then handed the same drawing.
+        // The profile aloft is a property of the hillside rather than of any
+        // one station, so the launch station's square is the one asked about —
+        // the same square the drawing releases its thermals in.
+        const launch = panels.find(panel => panel.station.isDefault) ?? panels[0];
+
         this.windgram = buildWindgram(panels.map(panel => ({
             station: panel.station,
             elevationFeet: panel.elevation,
             latitude: panel.latitude,
             longitude: panel.longitude,
             day: this.days.get(panel.station.key)
-        })));
+        })), launch ? this.aloft.get(launch.station.key) ?? null : null);
 
         this.panels.forEach(panel => this.apply(panel));
     }
