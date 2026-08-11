@@ -144,8 +144,8 @@ describe('the launch, in the real site configuration', () => {
     });
 
     it('states where the launch itself is, which is not where the station is', () => {
-        equal(launch.launch.latitude, 50.2856);
-        equal(launch.launch.longitude, -118.985967);
+        equal(launch.launch.latitude, 50.285547);
+        equal(launch.launch.longitude, -118.985436);
     });
 
     it('is not claimed by the stations that are not launches', () => {
