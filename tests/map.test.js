@@ -165,6 +165,24 @@ describe('the frame in the wind tile', () => {
         ok(markup.includes(`data-longitude="${coopers.lon}"`), markup);
     });
 
+    it('is centred on the launch instead, when the site places one', () => {
+        // The one thing on the page that is not the instrument's answer. The
+        // station is sited where it can be serviced; the launch is where people
+        // take off from, and it is the launch that should be in the frame.
+        const launch = {start: 100, end: 144, latitude: 50.2856, longitude: -118.985967};
+        const markup = index.renderWindMap(coopers, launch);
+
+        ok(markup.includes('data-latitude="50.2856"'), markup);
+        ok(markup.includes('data-longitude="-118.985967"'), markup);
+        ok(!markup.includes(`data-latitude="${coopers.lat}"`), 'and not the station');
+    });
+
+    it('falls back to the station when the launch names no coordinates', () => {
+        const markup = index.renderWindMap(coopers, {start: 100, end: 144, latitude: null, longitude: null});
+
+        ok(markup.includes(`data-latitude="${coopers.lat}"`), markup);
+    });
+
     it('carries the attribution the imagery is used under', () => {
         ok(index.renderWindMap(coopers).includes(MAP_CREDIT));
     });

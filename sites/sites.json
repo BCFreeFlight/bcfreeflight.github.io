@@ -11,7 +11,9 @@
           "cacheSeconds": 60,
           "launch": {
             "start": 100,
-            "end": 144
+            "end": 144,
+            "latitude": 50.285600,
+            "longitude": -118.985967
           },
           "youtube": {
             "channel": "UCQt2u6plzHb6gyfrnCprwGA",

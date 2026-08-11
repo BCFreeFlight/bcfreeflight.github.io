@@ -16,7 +16,7 @@ import * as readings from '../scripts/readings.js';
  * Nothing here touches the network beyond the site's own configuration file.
  */
 
-const COOPERS = {start: 100, end: 144};
+const COOPERS = {start: 100, end: 144, latitude: null, longitude: null};
 
 // The real configuration, not a fixture: a launch window nobody reads would be
 // worth nothing, and this is what catches it going missing.
@@ -33,11 +33,28 @@ function blowingFrom(degrees) {
 
 describe('reading a launch window out of configuration', () => {
     it('takes a pair of bearings', () => {
-        equal(launchWindow(COOPERS), {start: 100, end: 144});
+        equal(launchWindow({start: 100, end: 144}),
+            {start: 100, end: 144, latitude: null, longitude: null});
     });
 
     it('wraps bearings written outside the circle', () => {
-        equal(launchWindow({start: 370, end: -10}), {start: 10, end: 350});
+        equal(launchWindow({start: 370, end: -10}).start, 10);
+        equal(launchWindow({start: 370, end: -10}).end, 350);
+    });
+
+    it('takes the launch\'s own coordinates when it states them', () => {
+        const placed = launchWindow({start: 100, end: 144, latitude: 50.2856, longitude: -118.985967});
+
+        equal(placed.latitude, 50.2856);
+        equal(placed.longitude, -118.985967);
+    });
+
+    it('takes both coordinates or neither', () => {
+        // Half a coordinate is no place at all, and centring a map on it would
+        // put the launch somewhere it has never been.
+        equal(launchWindow({start: 100, end: 144, latitude: 50.2856}).latitude, null);
+        equal(launchWindow({start: 100, end: 144, longitude: -118.98}).longitude, null);
+        equal(launchWindow({start: 100, end: 144, latitude: 'up the hill', longitude: -118.98}).latitude, null);
     });
 
     it('is no window at all when either bearing is missing or unreadable', () => {
@@ -122,7 +139,13 @@ describe('the launch, in the real site configuration', () => {
     const others = site.stations.filter(station => !station.isDefault);
 
     it('stands at the default station, which is the one on the hill', () => {
-        equal(launch.launch, {start: 100, end: 144});
+        equal(launch.launch.start, 100);
+        equal(launch.launch.end, 144);
+    });
+
+    it('states where the launch itself is, which is not where the station is', () => {
+        equal(launch.launch.latitude, 50.2856);
+        equal(launch.launch.longitude, -118.985967);
     });
 
     it('is not claimed by the stations that are not launches', () => {
