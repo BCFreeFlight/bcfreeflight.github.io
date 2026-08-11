@@ -86,16 +86,23 @@ export const LCL_PER_DEGREE = 121;
  * The shape of the climb through the convective layer.
  *
  * A thermal is not one speed all the way up: it accelerates off the deck, peaks
- * around a third of the way up, and dies out below the top of the layer. The
+ * around a quarter of the way up, and dies out below the top of the layer. The
  * peak multiplies the layer mean; the taper is how fast it falls away above.
  *
- * Both are the RASP's, and the pair of them decide where a climb ends. With
- * this taper the best climb in the layer is 2.04 times the layer mean, a third
- * of the way up — which is why a day can have a healthy mean climb rate and
- * still be unflyable, and why the two are drawn as separate things.
+ * Both are the RASP's — `get-hcrit` in `generate-new-variables.lisp`, which
+ * writes the profile as `wstar × 4 × (agl/bldepth)^⅓ × (1 − 1.1 × agl/bldepth)`.
+ * The 1.1 is deliberate on its author's part: the file opens by noting the
+ * shape was switched back to 1.1 from 0.8. We had the 0.8, which put the climb
+ * dying at the top of the layer rather than at nine tenths of it and made every
+ * climb height too generous.
+ *
+ * With the RASP's taper the best climb in the layer is 1.83 times the layer
+ * mean, 23% of the way up, and the air stops beating a wing well below the top
+ * — which is why a day can have a healthy mean climb rate and still be
+ * unflyable, and why the two are drawn as separate things.
  */
 export const UPDRAFT_PEAK = 4;
-export const UPDRAFT_TAPER = 0.8;
+export const UPDRAFT_TAPER = 1.1;
 
 /**
  * Air pressure at a height, from the standard atmosphere.
@@ -104,6 +111,49 @@ export const UPDRAFT_TAPER = 0.8;
  */
 export function pressureAt(elevation) {
     return SEA_LEVEL_PRESSURE * Math.pow(1 - 2.25577e-5 * elevation, 5.25588);
+}
+
+/**
+ * Air pressure at a height, off the model's own pressure levels.
+ *
+ * The RASP reads a surface pressure field and uses it directly; the measured
+ * drawing has no such field, because two of the three stations have no
+ * barometer and the two that do disagree about whether they mean station or
+ * sea-level pressure. But the sounding is a list of heights each labelled with
+ * the pressure it is at, which answers the same question for any height between
+ * them — and it is the same HRDPS field the RASP would have read.
+ *
+ * Interpolated in log pressure, which is what makes it a straight line: pressure
+ * falls exponentially with height, so the logarithm of it does not.
+ *
+ * @param {Object[]} levels - Ascending levels carrying pressure in hPa
+ * @param {number} elevation - Metres above sea level
+ * @returns {?number} Pressure in pascals, or null when no level says
+ */
+export function pressureFrom(levels, elevation) {
+    const known = levels
+        .filter(level => Number.isFinite(level.pressure) && Number.isFinite(level.elevation))
+        .sort((a, b) => a.elevation - b.elevation);
+
+    if (known.length < 2) return null;
+
+    // The pair that straddles the height, or the nearest pair to continue from
+    // when it sits outside them altogether.
+    let below = known[0];
+    let above = known[1];
+
+    for (let i = 0; i < known.length - 1; i++) {
+        if (elevation > known[i + 1].elevation && i + 2 < known.length) continue;
+
+        below = known[i];
+        above = known[i + 1];
+        break;
+    }
+
+    const share = (elevation - below.elevation) / (above.elevation - below.elevation);
+    const logged = Math.log(below.pressure) + share * (Math.log(above.pressure) - Math.log(below.pressure));
+
+    return Math.exp(logged) * 100;
 }
 
 /**
@@ -164,9 +214,16 @@ export function dewpoint(temp, humidity) {
     return 243.04 * gamma / (17.625 - gamma);
 }
 
-// A bubble that never gets more than this far off the deck is not a thermal,
-// it is measurement noise between two stations.
-const MINIMUM_DEPTH = 50;
+/**
+ * How deep the convective layer has to be before a climb height is worked out
+ * at all, in metres above the ground.
+ *
+ * The RASP's own gate: `get-hcrit` reports the terrain height itself for
+ * anything under a hundred metres AGL rather than searching a layer that
+ * shallow. Below it there is nothing a wing could use anyway, and the search
+ * would be bisecting a layer thinner than its own tolerance.
+ */
+const MINIMUM_DEPTH = 100;
 
 /**
  * How much warmer than the air around it a bubble has to be before it goes.
@@ -256,103 +313,75 @@ export function temperatureAt(levels, height) {
 }
 
 /**
- * The height where a surface bubble runs out of buoyancy.
+ * How deep the convective layer is, off any profile.
  *
- * Walked upward in steps rather than solved, because the profile is piecewise
- * and the parcel can cross back and forth through an inversion before it
- * finally stops. The first crossing is the answer: a bubble that stalls at
- * 800 metres does not care that the air above 2000 would have carried it.
+ * The Canadian RASP's `get-boundary-layer-depth`, which is the parcel method a
+ * pilot does by hand: a bubble of surface air cools at the dry adiabatic rate
+ * as it rises, the air around it cools at whatever the sounding says, and the
+ * first height where the parcel is no longer the warmer of the two is the top
+ * of the layer. Inside the pair of levels that straddles that crossing the
+ * environment is taken to change linearly, so the height is solved outright
+ * rather than searched for.
  *
- * @param {Object[]} levels - Ascending {elevation, temp}, elevation in metres
- * @param {number} ceiling - How high to bother looking, in metres
- * @param {Object} [options] - trigger offset in ºC, and the step of the walk
- * @returns {?number} The top of the lift in metres above sea level, or null
+ * One function rather than two. The measured drawing used to walk the profile
+ * in 25 m steps while the forecast solved the crossing analytically, which
+ * meant the two answered the same question with different arithmetic — a
+ * difference nobody could account for when the tabs disagreed. What genuinely
+ * differs between them is what goes *in*: where the parcel is released, what
+ * temperature it starts at, and whether it needs the trigger offset below.
+ *
+ * @param {Object[]} levels - Ascending {elevation, temp}, in metres and ºC
+ * @param {Object} options - release height, its temperature, trigger and ceiling
+ * @returns {?number} Depth above the release in metres, zero when nothing
+ *     rises, or null when the profile cannot answer at all
  */
-export function thermalTop(levels, ceiling, {trigger = TRIGGER_OFFSET, step = 25} = {}) {
-    if (levels.length < 2) return null;
+export function convectiveDepth(levels, {release, surfaceTemp, trigger = 0, ceiling = Infinity} = {}) {
+    if (!Number.isFinite(release) || !Number.isFinite(surfaceTemp)) return null;
 
-    const ground = levels[0].elevation;
-    const surface = levels[0].temp + trigger;
+    const above = levels.filter(level =>
+        level.elevation > release && Number.isFinite(level.temp));
+
+    if (!above.length) return null;
+
+    // The parcel leaves the ground warmer than the reading by the trigger
+    // offset — which is zero for a modelled column, where the surface
+    // temperature is the ground's own and the superadiabatic layer is resolved.
+    const parcel = surfaceTemp + trigger;
 
     // Bounded by the profile as well as by the drawing. Past the topmost level
-    // the environment is extrapolated from the gradient below it, and a parcel
-    // raced against a straight line will win for as long as the line is drawn —
-    // so a search that ran to the ceiling was really measuring the ceiling.
-    // That mattered doubly once the ceiling came to be built from these tops:
-    // the chart would have been answering its own question. The RASP scans the
-    // levels it has and no further, and so does this.
-    const limit = Math.min(ceiling, levels.at(-1).elevation);
+    // the environment would have to be extrapolated, and a parcel raced against
+    // a straight line wins for as long as the line is drawn — so a search that
+    // ran to the ceiling was really measuring the ceiling. That mattered doubly
+    // once the ceiling came to be built from these depths: the chart would have
+    // been answering its own question.
+    const limit = Math.min(ceiling, above.at(-1).elevation);
 
-    let previous = ground;
+    let below = {elevation: release, temp: surfaceTemp};
 
-    for (let height = ground + step; height <= limit; height += step) {
-        const parcel = surface - DRY_ADIABAT * (height - ground);
-        const environment = temperatureAt(levels, height);
+    for (const level of above) {
+        if (level.elevation > limit) break;
 
-        if (!environment) return null;
-
-        // The moment the bubble is no longer the warmer of the two, it stops.
-        // The depth tested is the one about to be returned, not the step that
-        // failed: measuring the failed step reported a twenty-five metre bubble
-        // under a hard inversion as a five-hundred-metre thermal top.
-        if (parcel <= environment.temp) {
-            return previous - ground < MINIMUM_DEPTH ? null : previous;
-        }
-
-        previous = height;
-    }
-
-    // Still buoyant at the top of the profile. The honest answer is "at least
-    // this high" rather than a height nothing was measured at.
-    return limit - ground < MINIMUM_DEPTH ? null : limit;
-}
-
-/**
- * How deep the convective layer is, off a modelled sounding.
- *
- * The same parcel argument as `thermalTop`, but solved rather than walked, and
- * with no trigger offset. Both differences come from the profile: a model
- * publishes a dozen levels with the surface temperature among them, so the
- * crossing can be found exactly inside whichever pair of levels straddles it,
- * and the surface reading is the model's own ground temperature rather than a
- * thermometer standing in the parcel's own air — so there is nothing to
- * correct for.
- *
- * Returned as a depth rather than a height because that is what the climb rate
- * is scaled by. This is the Canadian RASP's calculation, constant for constant.
- *
- * @param {number} surfaceTemp - Ground-level air temperature in ºC
- * @param {Object[]} levels - Ascending {elevation, temp} strictly above the ground
- * @param {number} ground - Where the parcel starts, in metres above sea level
- * @returns {number} Depth in metres above ground, or zero when nothing rises
- */
-export function blDepth(surfaceTemp, levels, ground) {
-    let below = {elevation: ground, temp: surfaceTemp};
-
-    for (const level of levels) {
-        if (level.elevation <= ground) continue;
-
-        // Still the warmer of the two, so the parcel carries on past this level.
-        if (surfaceTemp - DRY_ADIABAT * (level.elevation - ground) > level.temp) {
+        // Still the warmer of the two, so the bubble carries on past this level.
+        if (parcel - DRY_ADIABAT * (level.elevation - release) > level.temp) {
             below = level;
             continue;
         }
 
-        // Inside this pair the environment is taken to change linearly, so the
-        // height where the two curves meet can be solved outright.
         const gradient = (level.temp - below.temp) / (level.elevation - below.elevation);
         const closing = DRY_ADIABAT + gradient;
 
-        // The two curves are parallel, or the layer is steeper than the parcel
-        // cools — neither of which crosses anywhere inside this pair.
+        // The two curves are parallel, or the layer cools faster than the
+        // parcel does — neither of which crosses anywhere inside this pair.
         if (!(closing > 0)) return 0;
 
-        const depth = (surfaceTemp - below.temp + gradient * (below.elevation - ground)) / closing;
+        const depth = (parcel - below.temp + gradient * (below.elevation - release)) / closing;
 
-        return depth > 0 ? depth : 0;
+        return depth > 0 ? Math.min(depth, limit - release) : 0;
     }
 
-    return 0;
+    // Still buoyant at the top of what there is to read. The honest answer is
+    // "at least this deep" rather than a height nothing was measured at.
+    return Math.max(0, limit - release);
 }
 
 /**
@@ -470,4 +499,51 @@ export function climbTop(top, ground, wstar, {sink = GLIDER_SINK, tolerance = 10
     }
 
     return ground + low;
+}
+
+/**
+ * Everything a pilot reads off the layer, from its depth.
+ *
+ * The three figures at the top of a windgram — where the lift stops, how fast
+ * it goes up, and how high a wing still climbs — are all the same calculation
+ * downstream of the boundary layer depth, and the RASP treats them that way:
+ * `wstar` from the depth, `hcrit` from `wstar`, and the cloud base capping the
+ * result. Both drawings on this site now derive them here, from whatever depth
+ * they worked out and whatever heat they have, so that a disagreement between
+ * the measured day and the forecast can only ever be about their inputs.
+ *
+ * Called after the depth has been smoothed rather than before, because these
+ * are crossings: a tenth of a degree of wobble in a profile steps the depth by
+ * hundreds of metres, and three figures smoothed separately do not keep the
+ * order between them — the climb line drifts above the cloud base it is
+ * supposed to stop at.
+ *
+ * @param {?number} depth - The convective layer's depth above the release
+ * @param {Object} options - release, surfaceTemp, flux, pressure and cloudBase
+ * @returns {Object} thermalTop, lift and climbTop, in metres and m/s
+ */
+export function climbFrom(depth, {release, surfaceTemp, flux, pressure = null, cloudBase = null} = {}) {
+    const nothing = {thermalTop: null, lift: null, climbTop: null};
+
+    // A gap rather than a zero: the hour was never answered, and a strip drawn
+    // through it would be inventing one.
+    if (depth === null || depth === undefined || flux === null || flux === undefined) return nothing;
+    if (!Number.isFinite(release) || !Number.isFinite(surfaceTemp)) return nothing;
+
+    const rising = flux > 0 && depth > 0;
+
+    // Nothing going up is a reading of zero, not a gap — an evening with the
+    // ground already cooling is an answer.
+    const lift = rising ? updraft(depth, flux, surfaceTemp, release, pressure) : 0;
+    const top = rising ? release + depth : null;
+
+    const usable = top !== null && lift ? climbTop(top, release, lift) : null;
+
+    // Cloud base ends the climb whatever the air above it is doing, which is
+    // what the RASP's `min(hcrit, lcl)` says too.
+    return {
+        thermalTop: top,
+        lift,
+        climbTop: usable !== null && cloudBase !== null ? Math.min(usable, cloudBase) : usable
+    };
 }

@@ -53,6 +53,29 @@ const SOUNDING_MODEL = 'gem_hrdps_continental';
  */
 export const LEVELS = [1000, 950, 925, 900, 875, 850, 800, 750, 700, 650, 600];
 
+/**
+ * What is read at every level.
+ *
+ * Height because a pressure level is not a fixed altitude, temperature for the
+ * stability bands and the parcel, and wind for the barbs. No humidity, unlike
+ * the forecast: the cloud hatching here is drawn only between the stations,
+ * where the dew point is measured.
+ *
+ * The wind is what changed most recently. Above the top station the drawing used
+ * to have nothing to put in the air at all — the barbs stopped at 5,453 ft and
+ * the part of the column a climb actually finishes in was blank. It is the same
+ * HRDPS the forecast tabs draw, so the three drawings now agree about the air
+ * over the hill instead of one of them going quiet.
+ *
+ * @type {string[]}
+ */
+const PER_LEVEL = [
+    'temperature',
+    'wind_speed',
+    'wind_direction',
+    'geopotential_height'
+];
+
 // A whole day behind, and no further forward than the hour we are in. The
 // windgram never draws the future, so nothing here asks for one: `past_hours`
 // with a single forecast hour gives a window that ends now.
@@ -67,8 +90,7 @@ export class SoundingApi {
      */
     profileUrl(latitude, longitude) {
         const fields = [
-            ...LEVELS.map(level => `temperature_${level}hPa`),
-            ...LEVELS.map(level => `geopotential_height_${level}hPa`),
+            ...LEVELS.flatMap(level => PER_LEVEL.map(field => `${field}_${level}hPa`)),
             'cloud_cover'
         ].join(',');
 

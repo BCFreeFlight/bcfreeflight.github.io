@@ -72,6 +72,15 @@ describe('asking about the air aloft', () => {
         });
     });
 
+    it('asks each level for its wind, which nothing on the hillside can report', () => {
+        const url = api.profileUrl(LUMBY.lat, LUMBY.lon);
+
+        LEVELS.forEach(level => {
+            ok(url.includes(`wind_speed_${level}hPa`), `${level} speed`);
+            ok(url.includes(`wind_direction_${level}hPa`), `${level} direction`);
+        });
+    });
+
     it('asks for cloud, and asks the surface for the energy balance', () => {
         ok(api.profileUrl(LUMBY.lat, LUMBY.lon).includes('cloud_cover'));
 
@@ -163,6 +172,25 @@ describe('shaping the air aloft', () => {
 
             const heights = above.map(level => level.elevation);
             equal(heights.join(), [...heights].sort((a, b) => a - b).join(), 'ascending');
+        });
+
+        forget();
+    });
+
+    it('carries the wind at each level, and names the level it came from', async () => {
+        forget();
+        const service = new Sounding();
+
+        await withFetch(both(), async () => {
+            const model = await service.load(LUMBY.lat, LUMBY.lon);
+            const above = service.profileAt(model, model.times[12], 5453 * 0.3048);
+
+            ok(above.every(level => Number.isFinite(level.windSpeed)), 'a speed at every level');
+            ok(above.every(level => level.windDir >= 0 && level.windDir <= 360),
+                'and a bearing that is a bearing');
+            // Named for itself, because there is no station up there to be
+            // named after and a barb has to say what it is when it is tapped.
+            ok(above.every(level => /^\d+ hPa$/.test(level.label)), `labelled: ${above[0]?.label}`);
         });
 
         forget();

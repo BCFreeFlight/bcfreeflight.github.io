@@ -394,8 +394,15 @@ export class Trends {
             return;
         }
 
-        // The panel already carries the launch's own coordinates.
-        this.launchAt = {latitude: panel.latitude, longitude: panel.longitude};
+        // The panel already carries the launch's own coordinates, and its
+        // elevation is where the forecast releases its parcel — the same height
+        // the measured drawing releases from, so the two answer the same
+        // question about the same hillside.
+        this.launchAt = {
+            latitude: panel.latitude,
+            longitude: panel.longitude,
+            release: Number.isFinite(panel.elevation) ? panel.elevation * FEET : undefined
+        };
 
         try {
             this.forecast = await forecast.load(this.launchAt.latitude, this.launchAt.longitude);

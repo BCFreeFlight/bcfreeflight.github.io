@@ -7,7 +7,7 @@ import {sharedFrame, flyingWindow, FEET} from '../scripts/rasp.js';
 import {Windgram} from '../scripts/windgram.js';
 import {FORECAST_STRIPS, FORECAST_CEILING, LAYOUT} from '../scripts/config/rasp.js';
 import {
-    blDepth, dewpoint, updraft, virtualHeatFlux, LCL_PER_DEGREE, DRY_ADIABAT
+    convectiveDepth, dewpoint, updraft, virtualHeatFlux, LCL_PER_DEGREE, DRY_ADIABAT
 } from '../scripts/lib/thermal.js';
 
 /**
@@ -81,9 +81,9 @@ async function read(options) {
  * @param {number} day - 0 for today, 1 for tomorrow
  * @returns {Promise<?Object>} The model
  */
-async function model(day = 0) {
+async function model(day = 0, options = {}) {
     return buildForecastWindgram(await read(),
-        {day, latitude: COOPERS.lat, longitude: COOPERS.lon});
+        {day, latitude: COOPERS.lat, longitude: COOPERS.lon, ...options});
 }
 
 describe('asking for the forecast', () => {
@@ -281,7 +281,7 @@ describe('the RASP\'s own arithmetic', () => {
         // parcel: 20 − 0.0098 z. environment: 20 + (13 − 20)/1000 × z.
         // 20 − 0.0098z = 20 − 0.007z has its only root at z = 0, so nothing
         // rises: the layer is stable relative to a dry parcel throughout.
-        equal(blDepth(20, levels, 1000), 0);
+        equal(convectiveDepth(levels, {release: 1000, surfaceTemp: 20}), 0);
     });
 
     it('carries a parcel up through a steep layer to where it stalls', () => {
@@ -294,7 +294,7 @@ describe('the RASP\'s own arithmetic', () => {
             {elevation: 2500, temp: 18}
         ];
 
-        const depth = blDepth(20, levels, 1000);
+        const depth = convectiveDepth(levels, {release: 1000, surfaceTemp: 20});
         const parcel = 20 - DRY_ADIABAT * depth;
         const environment = 14 + (18 - 14) / 1000 * (1000 + depth - 1500);
 
@@ -303,7 +303,7 @@ describe('the RASP\'s own arithmetic', () => {
     });
 
     it('has nothing to climb through under an inversion at the ground', () => {
-        equal(blDepth(10, [{elevation: 1100, temp: 15}], 1000), 0);
+        equal(convectiveDepth([{elevation: 1100, temp: 15}], {release: 1000, surfaceTemp: 10}), 0);
     });
 
     it('climbs at the rate the RASP would', () => {
@@ -387,6 +387,38 @@ describe('building a forecast day', () => {
         equal(built.ground, shaped.elevation);
         ok(built.floor < built.ground, 'with a little air under it');
         equal(built.ceiling, FORECAST_CEILING);
+    });
+
+    it('releases the parcel from launch when the page says where launch is', async () => {
+        // The model's terrain for this point sits some hundreds of metres under
+        // Cooper's, and a parcel released down there spends the morning under
+        // the valley inversion — correctly, and uselessly, because nobody
+        // launches from inside it. The measured drawing has always released
+        // from launch; this is the forecast doing the same, so that the two
+        // tabs answer the same question about the same hillside.
+        const built = await model(0);
+        const raised = await model(0, {release: 1500});
+
+        const hour = column => column.thermalTop !== null;
+
+        const low = built.columns.find(hour);
+        const high = raised.columns.find(hour);
+
+        ok(low && high, 'both days climb at some point');
+        ok(high.cloudBase > low.cloudBase,
+            `cloudbase moves up with the release: ${low.cloudBase} → ${high.cloudBase}`);
+    });
+
+    it('will not release a parcel underground', async () => {
+        // A launch below the model's own terrain is a launch the model has no
+        // air for. The ground wins.
+        const built = await model(0, {release: 10});
+        const shaped = await read();
+
+        built.columns.forEach(column => {
+            if (column.thermalTop === null) return;
+            ok(column.thermalTop > shaped.elevation, `${column.thermalTop} is above the terrain`);
+        });
     });
 
     it('names no stations, because none are standing in this air', async () => {

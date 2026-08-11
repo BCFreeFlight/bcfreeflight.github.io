@@ -6,8 +6,8 @@ import {Windgram} from '../scripts/windgram.js';
 import {Chart} from '../scripts/chart.js';
 import {barbCounts, barbPath, PENNANT, MAXIMUM_FEATHERS, CALM_RINGS} from '../scripts/lib/barb.js';
 import {sunHeight, clearSky, shadeFraction, sunTimes} from '../scripts/lib/solar.js';
-import {temperatureAt, thermalTop, updraft, heatFlux, climbTop, triggerFor, DRY_ADIABAT, HEAT_FRACTION, GLIDER_SINK, TRIGGER_OFFSET, FULL_SUN} from '../scripts/lib/thermal.js';
-import {CEILING, COLUMN_MS, STRIPS} from '../scripts/config/rasp.js';
+import {temperatureAt, convectiveDepth, climbFrom, pressureFrom, updraft, heatFlux, climbTop, triggerFor, DRY_ADIABAT, HEAT_FRACTION, GLIDER_SINK, TRIGGER_OFFSET, FULL_SUN, UPDRAFT_TAPER} from '../scripts/lib/thermal.js';
+import {CEILING, COLUMN_MS, STRIPS, EXTRAPOLATED_OPACITY} from '../scripts/config/rasp.js';
 import {reveal} from '../scripts/lib/reveal.js';
 
 /**
@@ -375,40 +375,64 @@ describe('the temperature profile', () => {
     });
 });
 
-describe('how high a thermal gets', () => {
+describe('how deep the convective layer gets', () => {
     // Cooling faster than the dry adiabat: a parcel stays buoyant all the way.
     const unstable = [{elevation: 500, temp: 30}, {elevation: 1500, temp: 5}];
 
     // An inversion: warmer above than below, so nothing goes anywhere.
     const inverted = [{elevation: 500, temp: 10}, {elevation: 1500, temp: 15}];
 
+    /**
+     * The depth off a profile, released at its own lowest level.
+     * @param {Object[]} levels - Ascending {elevation, temp}
+     * @param {number} ceiling - How high to bother looking
+     * @param {number} [trigger] - The surface allowance in ºC
+     * @returns {?number} Depth above the release, in metres
+     */
+    const depthOf = (levels, ceiling, trigger = TRIGGER_OFFSET) => convectiveDepth(levels, {
+        release: levels[0].elevation,
+        surfaceTemp: levels[0].temp,
+        trigger,
+        ceiling
+    });
+
     it('stops at the top of the profile when the air keeps cooling fast enough', () => {
         // Not at the ceiling. Above the topmost level the environment is a
         // straight line continued from below, and a parcel raced against a
         // straight line wins for as long as the line is drawn — so a search
         // that ran to the ceiling would be measuring the drawing, not the air.
-        equal(thermalTop(unstable, 3000), unstable.at(-1).elevation);
-        equal(thermalTop(unstable, 1000), 1000, 'and at the ceiling when that is lower');
+        equal(depthOf(unstable, 3000), 1000, 'the profile, not the ceiling');
+        equal(depthOf(unstable, 1000), 500, 'and the ceiling when that is lower');
     });
 
     it('finds nothing under an inversion, given nothing to trigger on', () => {
-        equal(thermalTop(inverted, 3000, {trigger: 0}), null);
+        equal(depthOf(inverted, 3000, 0), 0);
     });
 
     it('gets only a little way into a weak inversion on the trigger alone', () => {
         // Five degrees per kilometre of inversion is not much, and the default
         // trigger allowance really does punch a couple of hundred metres into
         // it. What matters is that it stays low.
-        const top = thermalTop(inverted, 3000);
-        ok(top !== null && top < 900, `capped low, got ${top}m`);
+        const depth = depthOf(inverted, 3000);
+        ok(depth > 0 && depth < 400, `capped low, got ${depth}m`);
     });
 
-    it('finds nothing under a strong inversion whatever the trigger', () => {
-        equal(thermalTop([{elevation: 500, temp: 10}, {elevation: 700, temp: 25}], 3000), null);
+    it('gets metres into a strong inversion, which is not a climb', () => {
+        // Fifteen degrees of inversion in two hundred metres. The trigger
+        // allowance buys the parcel a few tens of metres and no more, and the
+        // hundred-metre floor in `climbTop` is what turns that into no climb at
+        // all — the RASP's own gate, rather than a floor inside the parcel
+        // solve, which it does not have.
+        const depth = depthOf([{elevation: 500, temp: 10}, {elevation: 700, temp: 25}], 3000);
+
+        ok(depth > 0 && depth < 50, `${depth} m is noise, not a thermal`);
+        equal(climbTop(500 + depth, 500, 2), null, 'and nothing a wing could use');
     });
 
-    it('needs two levels to say anything', () => {
-        equal(thermalTop([{elevation: 500, temp: 30}], 3000), null);
+    it('needs something above the release to say anything at all', () => {
+        equal(depthOf([{elevation: 500, temp: 30}], 3000), null);
+        equal(convectiveDepth(unstable, {release: 2000, surfaceTemp: 30}), null,
+            'and nothing when the whole profile is below the parcel');
     });
 
     it('stops lower when the trigger allowance is smaller', () => {
@@ -416,8 +440,8 @@ describe('how high a thermal gets', () => {
         // set by how much warmer the bubble starts.
         const marginal = [{elevation: 500, temp: 20}, {elevation: 3000, temp: 20 - DRY_ADIABAT * 2500 + 5}];
 
-        const generous = thermalTop(marginal, 3000, {trigger: 4});
-        const mean = thermalTop(marginal, 3000, {trigger: 1});
+        const generous = depthOf(marginal, 3000, 4);
+        const mean = depthOf(marginal, 3000, 1);
 
         ok(generous > mean, `${generous} should beat ${mean}`);
     });
@@ -430,7 +454,25 @@ describe('how high a thermal gets', () => {
             {elevation: 1500, temp: 20 - DRY_ADIABAT * 1000}
         ];
 
-        equal(thermalTop(neutral, 3000, {trigger: 0}), null);
+        equal(depthOf(neutral, 3000, 0), 0);
+    });
+
+    it('solves the crossing inside the pair that straddles it', () => {
+        // The RASP interpolates rather than reporting the level below, and the
+        // measured drawing used to walk the profile in 25 m steps instead —
+        // which put the same air at two different heights on two tabs.
+        const levels = [
+            {elevation: 1000, temp: 20},
+            {elevation: 1500, temp: 20 - DRY_ADIABAT * 500 - 1},
+            {elevation: 2500, temp: 20 - DRY_ADIABAT * 500 - 1 + 3}
+        ];
+
+        const depth = convectiveDepth(levels,
+            {release: 1000, surfaceTemp: 20, trigger: 0, ceiling: 4000});
+
+        // The crossing is inside the top pair, so it is neither of the levels.
+        ok(depth > 500 && depth < 1500, `${depth} sits between the levels`);
+        ok(Math.abs(depth % 25) > 1e-9, `${depth} is solved, not stepped`);
     });
 });
 
@@ -492,13 +534,15 @@ describe('the height a wing can still climb to', () => {
         ok(climbTop(3000, 300, 0.8) > climbTop(3000, 300, 0.6));
     });
 
-    it('reaches the top of the layer when the whole of it beats the wing', () => {
-        // The climb only falls to 0.8 of the layer mean at the very top, so any
-        // day with a mean much past a metre a second is climbable all the way —
-        // and it is then cloudbase, not the air, that ends the climb.
-        // Within the search tolerance of the top, which is as close as a
-        // bisection gets to an answer sitting on the edge of its range.
-        close(climbTop(3000, 300, 3), 3000, 10);
+    it('stops below the top of the layer even on a strong day', () => {
+        // The RASP's profile falls to nothing at nine tenths of the layer, not
+        // at the top of it, so no day is climbable the whole way up: a mean of
+        // three metres a second still runs out around 83% of the depth. We had
+        // the shallower 0.8 taper, which let a strong day climb to the very top
+        // and made every climb height too generous.
+        close(climbTop(3000, 300, 3), 300 + 0.83 * 2700, 30);
+        ok(climbTop(3000, 300, 3) < 300 + 2700 / UPDRAFT_TAPER,
+            'and never past the height the profile itself reaches zero');
     });
 
     it('is nothing when the air never beats the glider', () => {
@@ -659,7 +703,13 @@ describe('thermals through the night', () => {
         const model = buildWindgram(profile({temp: 30, solar: 0}, {temp: 0}));
 
         ok(model.columns.every(column => column.thermalTop === null), 'no thermal without sun');
-        ok(model.columns.every(column => column.lift === null), 'and so no lift');
+
+        // Zero rather than nothing, which is what the forecast has always said
+        // for an hour it answered and found nothing rising. A gap is the
+        // drawing saying it does not know, and it breaks the strip into pieces.
+        ok(model.columns.every(column => column.lift === 0 || column.lift === null),
+            'and so no lift');
+        ok(model.columns.some(column => column.lift === 0), 'answered, not unknown');
     });
 
     it('reports a thermal once the sun is on the ground', () => {
@@ -705,6 +755,76 @@ describe('smoothing the profile', () => {
 
 
 
+describe('one derivation, shared by both drawings', () => {
+    const layer = {release: 1000, surfaceTemp: 25, flux: 250};
+
+    it('answers nothing at all when the hour was never answered', () => {
+        equal(climbFrom(null, layer), {thermalTop: null, lift: null, climbTop: null});
+        equal(climbFrom(1500, {...layer, flux: null}), {thermalTop: null, lift: null, climbTop: null});
+    });
+
+    it('answers zero when the hour was answered and nothing rises', () => {
+        // A gap and a zero are different claims: the first is the drawing
+        // saying it does not know, and it breaks the lift strip into pieces.
+        equal(climbFrom(0, layer).lift, 0);
+        equal(climbFrom(0, layer).thermalTop, null);
+        equal(climbFrom(1500, {...layer, flux: 0}).lift, 0);
+    });
+
+    it('puts the top of the lift a depth above the release', () => {
+        equal(climbFrom(1500, layer).thermalTop, 2500);
+    });
+
+    it('keeps the climb under the cloud it would run into', () => {
+        const open = climbFrom(2000, layer);
+        const capped = climbFrom(2000, {...layer, cloudBase: 1800});
+
+        ok(open.climbTop > 1800, `${open.climbTop} with nothing in the way`);
+        equal(capped.climbTop, 1800, 'and cloudbase where there is');
+    });
+
+    it('climbs faster on the same day at a thinner pressure', () => {
+        const thick = climbFrom(1500, {...layer, pressure: 90000});
+        const thin = climbFrom(1500, {...layer, pressure: 70000});
+
+        ok(thin.lift > thick.lift, `${thin.lift} in thin air beats ${thick.lift}`);
+    });
+});
+
+describe('the pressure where the thermal starts', () => {
+    // A sounding is a list of heights, each labelled with the pressure it is at.
+    const levels = [
+        {elevation: 1000, pressure: 900},
+        {elevation: 2000, pressure: 800},
+        {elevation: 3000, pressure: 700}
+    ];
+
+    it('reads a level off its own height', () => {
+        close(pressureFrom(levels, 2000), 80000, 1);
+    });
+
+    it('interpolates between two of them', () => {
+        const middle = pressureFrom(levels, 1500);
+
+        ok(middle < 90000 && middle > 80000, `${middle} sits between the levels`);
+        // In log pressure rather than in pressure, because pressure falls
+        // exponentially with height and its logarithm does not.
+        close(middle, Math.exp((Math.log(900) + Math.log(800)) / 2) * 100, 1);
+    });
+
+    it('continues from the nearest pair for a height outside them', () => {
+        ok(pressureFrom(levels, 500) > 90000, 'below the lowest level');
+        ok(pressureFrom(levels, 3500) < 70000, 'and above the highest');
+    });
+
+    it('has nothing to say without two levels carrying a pressure', () => {
+        equal(pressureFrom([], 1000), null);
+        equal(pressureFrom([{elevation: 1000, pressure: 900}], 1000), null);
+        equal(pressureFrom([{elevation: 1000}, {elevation: 2000}], 1500), null,
+            'a station has a height but no barometer');
+    });
+});
+
 describe('the allowance for the layer no thermometer sees', () => {
     it('is nothing in the dark', () => {
         equal(triggerFor(0), 0);
@@ -727,8 +847,10 @@ describe('the allowance for the layer no thermometer sees', () => {
     it('lifts a morning parcel less far than an afternoon one', () => {
         const levels = [{elevation: 500, temp: 20}, {elevation: 3000, temp: 2}];
 
-        const morning = thermalTop(levels, 4000, {trigger: triggerFor(100)});
-        const afternoon = thermalTop(levels, 4000, {trigger: triggerFor(800)});
+        const morning = convectiveDepth(levels,
+            {release: 500, surfaceTemp: 20, trigger: triggerFor(100), ceiling: 4000});
+        const afternoon = convectiveDepth(levels,
+            {release: 500, surfaceTemp: 20, trigger: triggerFor(800), ceiling: 4000});
 
         ok(morning < afternoon, `${morning} should be under ${afternoon}`);
     });
@@ -772,16 +894,30 @@ describe('moving the model onto the measurements', () => {
         ok(high > low, `${low} at 600 m should be under ${high} at 800 m`);
     });
 
-    it('fades the correction out above the top station', () => {
+    it('carries the correction upward without bending the air', () => {
         const moved = anchored(stations, modelled);
         const near = moved.find(level => level.elevation === 2200);
-
-        // The top station is 2 degrees over the model there; a level 600 m
-        // above it keeps some of that, and nothing keeps all of it.
         const error = stations.at(-1).temp - temperatureAt(modelled, 1600).temp;
 
-        ok(Math.abs(near.temp - 4) < Math.abs(error), 'moved less than the full correction');
-        ok(near.temp !== 4, 'but moved');
+        // The whole correction, not a fading part of it. A shrinking shift is a
+        // lapse rate: it would cool the air aloft by a degree or so per thousand
+        // feet that the model never said anything about, and paint the first
+        // kilometre above the top station more unstable than the same HRDPS hour
+        // drawn on the forecast tab.
+        close(near.temp - 4, error, 1e-9, 'shifted by the full error');
+    });
+
+    it('leaves every modelled gradient above the top station alone', () => {
+        const moved = anchored(stations, modelled).filter(level => level.aloft);
+        const raw = modelled.filter(level =>
+            moved.some(shifted => shifted.elevation === level.elevation));
+
+        // Stability is a gradient, so this is the property that decides the
+        // colours: whatever the shift is, it must be the same at every height
+        // up there or the bands stop matching the model they came from.
+        const shifts = moved.map((level, index) => level.temp - raw[index].temp);
+
+        shifts.forEach(shift => close(shift, shifts[0], 1e-9, 'one shift, all the way up'));
     });
 
     it('marks only the levels above the top station as a guess', () => {
@@ -1030,7 +1166,7 @@ describe('drawing it', () => {
  * @returns {Object} A model in the shape the sounding service hands over
  */
 function sky({levels = [[1800, 8], [2400, 2], [3200, -6]], cloud = 40, share = 0.5,
-    from = 6, hours = 8} = {}) {
+    from = 6, hours = 8, wind = [12, 300]} = {}) {
     // Over the same hours the staged stations report, so the modelled air is
     // actually there for the columns the assertions look at.
     const times = Array.from({length: hours + 1},
@@ -1041,7 +1177,11 @@ function sky({levels = [[1800, 8], [2400, 2], [3200, -6]], cloud = 40, share = 0
         levels: levels.map(([height, temp], index) => ({
             pressure: 800 - index * 50,
             heights: times.map(() => height),
-            temps: times.map(() => temp)
+            temps: times.map(() => temp),
+            // Null for both when the caller asks for no wind, which is how the
+            // model answers for a level it did not carry.
+            windSpeed: times.map(() => wind?.[0] ?? null),
+            windDir: times.map(() => wind?.[1] ?? null)
         })),
         cloud: times.map(() => cloud),
         share: times.map(() => share)
@@ -1091,7 +1231,7 @@ describe('the air above the top station', () => {
 
         // Every station reading is still in the profile, and nothing modelled
         // has been slipped in underneath the top station.
-        equal(column.levels.length, 2, 'both stations');
+        equal(column.levels.filter(level => !level.aloft).length, 2, 'both stations');
         ok(column.profile.filter(level => level.modelled).every(level => level.elevation > top),
             'the model only ever speaks above the last thermometer');
     });
@@ -1099,6 +1239,66 @@ describe('the air above the top station', () => {
     it('draws the modelled air knocked back, the way the guess was', () => {
         const markup = draw(buildWindgram(SOARING(), sky()));
         ok(markup.includes('windgram-extrapolated-edge'), 'the line where measurement stops is still drawn');
+    });
+
+    it('carries the model\'s wind above the highest station', () => {
+        const column = midday(buildWindgram(SOARING(), sky()));
+        const top = 5000 * FEET;
+
+        const modelled = column.levels.filter(level => level.aloft);
+
+        ok(modelled.length, 'there is wind up there at all');
+        ok(modelled.every(level => level.elevation > top),
+            'and every bit of it is above the last anemometer');
+        ok(modelled.every(level => /hPa$/.test(level.label)),
+            'each one named for the pressure level it is');
+    });
+
+    it('has no wind aloft to draw when the model is silent about it', () => {
+        // The same air, published without a wind — which is what a level the
+        // model does not carry comes back as.
+        const column = midday(buildWindgram(SOARING(), sky({wind: null})));
+
+        equal(column.levels.some(level => level.aloft), false);
+    });
+
+    it('has none either when there is no model at all', () => {
+        equal(midday(buildWindgram(SOARING())).levels.some(level => level.aloft), false);
+    });
+
+    it('draws the barbs up there knocked back, like the air around them', () => {
+        const markup = draw(buildWindgram(SOARING(), sky()));
+
+        ok(new RegExp(`class="windgram-barb"[^>]*opacity="${EXTRAPOLATED_OPACITY}"`).test(markup),
+            'a modelled barb is faded');
+        ok(/class="windgram-barb"(?![^>]*opacity)/.test(markup),
+            'and a measured one is not');
+    });
+
+    it('leaves a modelled barb at the height the model gave it', () => {
+        // Station barbs are lifted 500 ft so they clear the station's own rule.
+        // A pressure level has no rule to clear, and lifting it would print it
+        // off its own geopotential height.
+        const model = buildWindgram(SOARING(), sky());
+        const host = document.createElement('div');
+
+        host.style.cssText = 'width:900px;position:absolute;left:-9999px;top:0';
+        document.body.appendChild(host);
+
+        const windgram = new Windgram(host);
+        windgram.setModel(model);
+
+        const column = midday(model);
+        const level = column.levels.find(entry => entry.aloft);
+        const at = windgram.y(level.elevation);
+
+        const drawn = [...host.querySelectorAll('.windgram-barb-hit')]
+            .map(hit => Number(hit.getAttribute('cy')));
+
+        ok(drawn.some(y => Math.abs(y - at) < 1), `a barb sits at ${at}: ${drawn}`);
+
+        windgram.destroy();
+        host.remove();
     });
 
     it('says in the footnotes which of the two it is', () => {
@@ -1116,7 +1316,12 @@ describe('a thermal climbing into modelled air', () => {
     it('stops at an inversion the model knows about and the stations cannot', () => {
         const cold = midday(buildWindgram(SOARING(), sky())).thermalTop;
         // Same hillside, same sun — but warm air sitting on top of it.
-        const capped = midday(buildWindgram(SOARING(), sky({levels: [[1800, 25], [2400, 26], [3200, 24]]}))).thermalTop;
+        // A degree of warming per six hundred metres is a stable layer, but not
+        // a lid: with the correction above the top station now carried up
+        // whole rather than fading, the model's gradients survive intact, and a
+        // parcel leaving a hillside twenty degrees warmer than the air above it
+        // still walks through a slack inversion like that one. This is a lid.
+        const capped = midday(buildWindgram(SOARING(), sky({levels: [[1800, 25], [2400, 34], [3200, 36]]}))).thermalTop;
 
         ok(capped < cold, `capped ${capped} should be under ${cold}`);
         ok(capped > 5000 * FEET, 'though still above the stations');

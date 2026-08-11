@@ -10,9 +10,10 @@ import {valueAt} from './lib/series-time.js';
  *
  * Kept deliberately thin. Everything this returns is something no sensor on the
  * hillside can report, and everything a sensor *can* report is left to the
- * sensor — so there is no temperature here below the top station, no wind at
- * all, and no sunlight except the one figure used to work out what share of it
- * becomes heat.
+ * sensor — so the temperature below the top station is only ever used for the
+ * shape between two readings, the wind is only drawn above the highest station,
+ * and there is no sunlight except the one figure used to work out what share of
+ * it becomes heat.
  *
  * Cached by grid square like the air quality, and for the same reason: the model
  * publishes hourly, so asking more often than that re-reads the same numbers.
@@ -154,7 +155,9 @@ export class Sounding {
             .map(pressure => ({
                 pressure,
                 temps: this.column(hourly[`temperature_${pressure}hPa`], hourly.time.length),
-                heights: this.column(hourly[`geopotential_height_${pressure}hPa`], hourly.time.length)
+                heights: this.column(hourly[`geopotential_height_${pressure}hPa`], hourly.time.length),
+                windSpeed: this.column(hourly[`wind_speed_${pressure}hPa`], hourly.time.length),
+                windDir: this.column(hourly[`wind_direction_${pressure}hPa`], hourly.time.length)
             }))
             // A level the model does not carry is dropped rather than kept as a
             // column of gaps that every reader then has to skip.
@@ -212,15 +215,25 @@ export class Sounding {
      * @param {?Object} sounding - A shaped model
      * @param {number} time - The moment being drawn, in milliseconds
      * @param {number} above - Return levels higher than this, in metres
-     * @returns {Object[]} Ascending {elevation, temp, modelled}
+     * @returns {Object[]} Ascending {elevation, temp, windSpeed, windDir, label, modelled}
      */
     profileAt(sounding, time, above) {
         if (!sounding?.levels?.length) return [];
 
         return sounding.levels
             .map(level => ({
+                // A pressure level has no station to be named after, so it names
+                // itself — which is what a barb over the top station has to say
+                // when it is tapped.
+                label: `${level.pressure} hPa`,
+                // Carried through because it answers what no barometer on the
+                // hillside can: the pressure the thermal is leaving the ground
+                // at, which the climb rate is scaled by.
+                pressure: level.pressure,
                 elevation: valueAt(sounding.times, level.heights, time, ALIGN_TOLERANCE),
                 temp: valueAt(sounding.times, level.temps, time, ALIGN_TOLERANCE),
+                windSpeed: valueAt(sounding.times, level.windSpeed, time, ALIGN_TOLERANCE),
+                windDir: valueAt(sounding.times, level.windDir, time, ALIGN_TOLERANCE),
                 modelled: true
             }))
             .filter(level => isNumber(level.elevation) && isNumber(level.temp)

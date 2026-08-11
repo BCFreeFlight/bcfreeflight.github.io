@@ -3,7 +3,7 @@ import {isNumber} from './lib/numbers.js';
 import {binomial} from './lib/smooth.js';
 import {FEET, slab, cloudBands, isotherms, flyingWindow} from './rasp.js';
 import {
-    blDepth, climbTop, dewpoint, updraft, virtualHeatFlux, LCL_PER_DEGREE
+    convectiveDepth, climbFrom, dewpoint, temperatureAt, pressureFrom, virtualHeatFlux, LCL_PER_DEGREE
 } from './lib/thermal.js';
 
 /**
@@ -56,9 +56,10 @@ function firstMidnight(forecast) {
  * @param {number} index - Which published hour
  * @param {number} ground - The model's terrain height, in metres
  * @param {number} ceiling - The top of the drawing, in metres
+ * @param {number} release - Where the parcel is let go, in metres
  * @returns {Object} A column, whose levels may be empty when the model is silent
  */
-function buildColumn(forecast, index, ground, ceiling) {
+function buildColumn(forecast, index, ground, ceiling, release) {
     const {surface} = forecast;
 
     const temp = surface.temp[index];
@@ -67,6 +68,9 @@ function buildColumn(forecast, index, ground, ceiling) {
     const aloft = forecast.levels
         .map(level => ({
             label: `${level.pressure} hPa`,
+            // Kept beside the height so the pressure at any height between two
+            // levels can be read back out of the column. See `pressureFrom`.
+            pressure: level.pressure,
             elevation: level.heights[index],
             temp: level.temps[index],
             humidity: level.humidity[index],
@@ -127,17 +131,39 @@ function buildColumn(forecast, index, ground, ceiling) {
     // model's own answer to the same question.
     const convecting = flux !== null && flux > 0;
 
+    // The air where the parcel is released. The model answers for its own
+    // terrain, which in a valley this steep is some hundreds of metres below
+    // launch — so both the temperature and the dew point are read at launch
+    // height off the model's own column, the same way the measured drawing
+    // releases from launch rather than from the valley floor.
+    const surfaceTemp = release === ground ? temp : temperatureAt(measured, release)?.temp ?? null;
+
+    const dewpoints = measured
+        .filter(level => isNumber(level.dewpt))
+        .map(level => ({elevation: level.elevation, temp: level.dewpt}));
+
+    const releaseDew = release === ground
+        ? dewpt
+        : dewpoints.length ? temperatureAt(dewpoints, release)?.temp ?? null : null;
+
     // Null means the hour is missing; zero means the hour was answered and
     // nothing rises. Only the first should leave a gap in anything drawn.
-    const depth = flux === null || temp === null ? null
-        : convecting ? blDepth(temp, aloft, ground)
+    const depth = flux === null || surfaceTemp === null ? null
+        : convecting ? convectiveDepth(measured, {release, surfaceTemp, ceiling})
             : 0;
 
     // Cloud base as a pilot works it out: the spread between temperature and
-    // dew point at the ground, times the rate at which the two converge.
-    const base = temp === null || dewpt === null
+    // dew point where the parcel starts, times the rate at which the two
+    // converge.
+    const base = surfaceTemp === null || releaseDew === null
         ? null
-        : ground + LCL_PER_DEGREE * Math.max(0, temp - dewpt);
+        : release + LCL_PER_DEGREE * Math.max(0, surfaceTemp - releaseDew);
+
+    // The pressure at the release rather than at the model's own ground, off
+    // the same pressure levels the profile is read from.
+    const releasePressure = release === ground
+        ? surface.pressure[index]
+        : pressureFrom(aloft, release) ?? surface.pressure[index];
 
     return {
         time: forecast.times[index],
@@ -150,6 +176,9 @@ function buildColumn(forecast, index, ground, ceiling) {
         depth,
         flux,
         temp,
+        release,
+        surfaceTemp,
+        releasePressure,
         pressure: surface.pressure[index],
         cloudBase: base !== null && base < ceiling ? base : null,
         seaLevel: surface.seaLevel[index],
@@ -166,11 +195,12 @@ function buildColumn(forecast, index, ground, ceiling) {
  * Builds one forecast day's drawing.
  *
  * @param {?Object} forecast - A shaped forecast from `forecast.js`
- * @param {Object} [options] - which day, where the sun is worked out for, and the
- *     floor and ceiling shared with the other drawings
+ * @param {Object} [options] - which day, where the sun is worked out for, where
+ *     the parcel is released, and the floor and ceiling shared with the other
+ *     drawings
  * @returns {?Object} A model the windgram can draw, or null when the day is empty
  */
-export function buildForecastWindgram(forecast, {day = 0, latitude, longitude, frame} = {}) {
+export function buildForecastWindgram(forecast, {day = 0, latitude, longitude, frame, release} = {}) {
     if (!forecast?.times?.length || !isNumber(forecast.elevation)) return null;
     if (!forecast.levels?.length) return null;
 
@@ -196,7 +226,19 @@ export function buildForecastWindgram(forecast, {day = 0, latitude, longitude, f
         ceiling: FORECAST_CEILING
     };
 
-    const columns = hours.map(hour => buildColumn(forecast, hour.index, ground, ceiling));
+    // Released from launch where the page knows where launch is, and from the
+    // model's own terrain otherwise.
+    //
+    // This matters more than it sounds. The model's ground for Cooper's is
+    // several hundred metres below the launch, and a parcel released down there
+    // spends a summer morning under the valley inversion — correctly, and
+    // uselessly, because nobody launches from inside it. Releasing both drawings
+    // from the same height is most of what made the measured day and the
+    // forecast disagree about the same afternoon.
+    const parcelFrom = isNumber(release) ? Math.max(ground, release) : ground;
+
+    const columns = hours.map(hour =>
+        buildColumn(forecast, hour.index, ground, ceiling, parcelFrom));
 
     // Nothing but empty columns is not a day worth drawing; it is a gap the
     // model left, and the panel says so rather than showing an empty frame.
@@ -229,30 +271,17 @@ export function buildForecastWindgram(forecast, {day = 0, latitude, longitude, f
     });
 
     columns.forEach(column => {
-        const {depth, flux, temp, cloudBase} = column;
-
+        // One derivation, shared with the measured drawing: see `climbFrom`.
         // Smoothing can carry a little depth into an hour whose ground has
-        // already stopped warming — the evening, most often. The flux is the
-        // gate on whether anything is rising at all, so it is tested here as
-        // well as before the depth was worked out.
-        const rising = flux !== null && flux > 0 && depth !== null && depth > 0;
-
-        // Nothing going up is a reading of zero, not a gap. A gap is the drawing
-        // saying it does not know, and it breaks the strip into pieces.
-        column.lift = depth === null ? null
-            : rising ? updraft(depth, flux, temp, ground, column.pressure)
-                : 0;
-
-        column.thermalTop = rising ? ground + depth : null;
-
-        const usable = column.thermalTop !== null && column.lift
-            ? climbTop(column.thermalTop, ground, column.lift)
-            : null;
-
-        // Cloudbase ends the climb whatever the air above it is doing.
-        column.climbTop = usable !== null && cloudBase !== null
-            ? Math.min(usable, cloudBase)
-            : usable;
+        // already stopped warming — the evening, most often — and the flux is
+        // the gate on whether anything rises at all, which is tested in there.
+        Object.assign(column, climbFrom(column.depth, {
+            release: column.release,
+            surfaceTemp: column.surfaceTemp,
+            flux: column.flux,
+            pressure: column.releasePressure,
+            cloudBase: column.cloudBase
+        }));
 
         // The strip wants the sea-level pressure; the physics wanted the
         // surface one. Only the first is drawn.
