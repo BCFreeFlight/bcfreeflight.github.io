@@ -164,6 +164,20 @@ export class Chart {
     }
 
     /**
+     * When the sun rose and set over this station, so the day can be marked on
+     * the chart rather than only named above it.
+     *
+     * Stored rather than drawn, like the catalogue: the caller sets this before
+     * the view, and setting the view is what redraws.
+     *
+     * @param {?Object} sun - sunrise and sunset, in milliseconds
+     * @returns {void}
+     */
+    setSun(sun) {
+        this.sun = sun;
+    }
+
+    /**
      * The measurements this chart may draw. Defaults to the ones a station
      * records; the page adds the lapse rates it works out between stations.
      * @param {Object[]} catalogue - Series definitions
@@ -227,6 +241,7 @@ export class Chart {
                  viewBox="0 0 ${width} ${height}" role="img"
                  aria-label="${escape(series.map(item => item.label).join(', '))} through today">
                 ${this.plots.map(plot => this.renderPlot(plot)).join('')}
+                ${this.renderSun()}
                 ${this.renderHours(width)}
                 <g class="chart-readout" hidden>
                     <line class="chart-crosshair" y1="${PAD.top - 4}" y2="${this.plots.at(-1).bottom}"></line>
@@ -240,6 +255,46 @@ export class Chart {
         this.valueLayer = this.host.querySelector('.chart-values');
 
         this.reflowLegends();
+    }
+
+    /**
+     * Sunrise and sunset, ruled down the whole stack.
+     *
+     * One line each rather than one per plot: the reader is being shown a
+     * moment, and a moment is the same moment on every panel. Drawn over the
+     * data rather than under it, which is why they are thin, dashed and grey —
+     * the day's bounds are the frame around the readings, not another reading.
+     *
+     * @returns {string} SVG markup
+     */
+    renderSun() {
+        if (!this.plots.length || !this.day) return '';
+
+        const first = this.plots[0];
+        const last = this.plots.at(-1);
+
+        return [
+            {at: this.sun?.sunrise, label: 'Sunrise'},
+            {at: this.sun?.sunset, label: 'Sunset'}
+        ]
+            // A day above the arctic circle has neither, and a sunset can fall
+            // past the end of the axis at the far north in summer.
+            .filter(mark => Number.isFinite(mark.at)
+                && mark.at >= this.day.dayStart && mark.at <= this.day.dayEnd)
+            .map(mark => {
+                const x = this.x(mark.at, first);
+
+                // Flipped before the label would run off the right-hand edge.
+                const flip = x > (first.left + first.right) / 2;
+
+                return `<g class="chart-sun">
+                    <line class="chart-sun-line" x1="${x.toFixed(1)}" y1="${first.top}"
+                          x2="${x.toFixed(1)}" y2="${last.bottom}"></line>
+                    <text class="chart-sun-label" x="${(x + (flip ? -4 : 4)).toFixed(1)}"
+                          y="${(first.top - 4).toFixed(1)}"
+                          text-anchor="${flip ? 'end' : 'start'}">${mark.label}</text>
+                </g>`;
+            }).join('');
     }
 
     /**

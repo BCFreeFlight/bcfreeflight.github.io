@@ -9,6 +9,7 @@ import {Windgram} from './windgram.js';
 import {buildWindgram} from './rasp.js';
 import {lapsePairs, lapseColumn} from './lapse-series.js';
 import {airColumn} from './air-series.js';
+import {sunTimes} from './lib/solar.js';
 import {shadeColumn, cloudColumn} from './sky-series.js';
 
 /**
@@ -25,6 +26,9 @@ import {shadeColumn, cloudColumn} from './sky-series.js';
  * them. They are cached for five minutes, which is how often the underlying
  * buckets change, so switching tabs costs nothing.
  */
+
+// One hour, for the daylight figure beside the sunrise and sunset.
+const HOUR = 60 * 60 * 1000;
 
 export class Trends {
     constructor() {
@@ -78,6 +82,8 @@ export class Trends {
                         </div>
                     </div>
                 </div>
+
+                <p class="trend-sun" hidden></p>
 
                 <div class="chart-host"></div>
                 <div class="windgram-host" hidden></div>
@@ -351,6 +357,53 @@ export class Trends {
     }
 
     /**
+     * When the sun came up and when it goes down, over the chart it bounds.
+     *
+     * Worth stating outright rather than leaving to be read off the solar
+     * radiation line, because it is the one thing on this panel that is about
+     * the rest of the day rather than the part already logged: everything else
+     * here stops at the last reading.
+     *
+     * Both come from the station's own coordinates and the date, which is all
+     * the sun needs — no service is asked, and the answer does not change if one
+     * is unreachable.
+     *
+     * @param {Object} panel - A mounted panel
+     * @param {?Object} day - The day being charted, for the date it falls on
+     * @returns {void}
+     */
+    renderSun(panel, {sunrise, sunset, up}) {
+        const host = panel.host.querySelector('.trend-sun');
+        if (!host) return;
+
+        if (sunrise === null || sunset === null) {
+            // Only reachable inside the arctic circle, where there is no
+            // sunrise to name. Better to say which kind of day it is than to
+            // leave the reader looking for a time that does not exist.
+            host.hidden = up === null;
+            host.textContent = up === true ? 'The sun does not set today.'
+                : up === false ? 'The sun does not rise today.' : '';
+            return;
+        }
+
+        const clock = at => new Date(at).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+        const daylight = sunset - sunrise;
+
+        host.hidden = false;
+        host.innerHTML = `
+            <span class="trend-sun-item">
+                <span class="trend-sun-icon material-symbols-outlined" aria-hidden="true">wb_twilight</span>
+                Sunrise <strong>${clock(sunrise)}</strong>
+            </span>
+            <span class="trend-sun-item">
+                <span class="trend-sun-icon material-symbols-outlined" aria-hidden="true">bedtime</span>
+                Sunset <strong>${clock(sunset)}</strong>
+            </span>
+            <span class="trend-sun-length">${Math.floor(daylight / HOUR)}h ${
+                Math.round((daylight % HOUR) / 60000)}m of daylight</span>`;
+    }
+
+    /**
      * Redraws one panel's chips, chart and note from the current selection.
      * @param {Object} panel - A mounted panel
      * @returns {void}
@@ -358,6 +411,13 @@ export class Trends {
     apply(panel) {
         const day = this.dayFor(panel);
         const showing = this.showing();
+
+        // Noon rather than midnight, so the day being asked about is the same
+        // one whichever side of UTC the station sits.
+        const sun = sunTimes((day?.dayStart ?? Date.now()) + 12 * HOUR,
+            panel.latitude, panel.longitude);
+
+        this.renderSun(panel, sun);
 
         // The windgram is not a selection of measurements, so its mode hides
         // the picker rather than leaving a control that changes nothing.
@@ -407,6 +467,7 @@ export class Trends {
         });
 
         panel.chart.setCatalogue(this.catalogue());
+        panel.chart.setSun(sun);
         panel.chart.setDay(day);
         panel.chart.setView(showing, this.mode);
 
