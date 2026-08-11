@@ -94,6 +94,7 @@ export class Sites {
             // valley and the summit stations report the same site's weather
             // without being anywhere anyone takes off from.
             launch: launchWindow(station.launch),
+            coordinates: this.coordinates(station.coordinates),
             // Stable enough to use in element ids and to key state by.
             key: station.wunderground.toLowerCase(),
             name: station.name ?? station.wunderground,
@@ -106,6 +107,31 @@ export class Sites {
             cacheSeconds: station.cacheSeconds
                 ?? (isDefault ? DEFAULT_CACHE_SECONDS : REFERENCE_CACHE_SECONDS)
         };
+    }
+
+    /**
+     * Where a station stands, as stated by the configuration.
+     *
+     * Every station reports its own position in its observation, and for
+     * anything measured that is the honest source — an instrument's readings
+     * belong to wherever the instrument is. This is for the one thing that is
+     * not a measurement: the satellite tile behind the wind direction, which
+     * should be centred on the place people know by name. A station is sited
+     * where it can be serviced and where it reads the air cleanly, which at
+     * Cooper's is tens of metres off the takeoff itself.
+     *
+     * Both or neither. Half a coordinate is no place at all, and centring a map
+     * on it would put a station somewhere it has never been.
+     *
+     * @param {?Object} coordinates - The configured latitude and longitude
+     * @returns {?Object} latitude and longitude, or null when unstated
+     */
+    coordinates(coordinates) {
+        const {latitude, longitude} = coordinates ?? {};
+
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+        return {latitude, longitude};
     }
 
     /**

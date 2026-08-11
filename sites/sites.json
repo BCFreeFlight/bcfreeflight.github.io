@@ -9,11 +9,13 @@
           "short_name": "Coopers",
           "wunderground": "ILUMBY7",
           "cacheSeconds": 60,
-          "launch": {
-            "start": 100,
-            "end": 144,
+          "coordinates": {
             "latitude": 50.285548,
             "longitude": -118.984665
+          },
+          "launch": {
+            "start": 100,
+            "end": 144
           },
           "youtube": {
             "channel": "UCQt2u6plzHb6gyfrnCprwGA",
@@ -24,13 +26,21 @@
           "name": "Freedom Flight Park",
           "short_name": "FFP",
           "wunderground": "ILUMBY8",
-          "cacheSeconds": 1800
+          "cacheSeconds": 1800,
+          "coordinates": {
+            "latitude": 50.265725,
+            "longitude": -118.967077
+          }
         },
         {
           "name": "Silver Star",
           "short_name": "SilverStar",
           "wunderground": "IVERNO71",
-          "cacheSeconds": 1800
+          "cacheSeconds": 1800,
+          "coordinates": {
+            "latitude": 50.368490,
+            "longitude": -119.063354
+          }
         }
       ]
     }

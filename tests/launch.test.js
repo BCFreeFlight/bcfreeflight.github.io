@@ -16,7 +16,7 @@ import * as readings from '../scripts/readings.js';
  * Nothing here touches the network beyond the site's own configuration file.
  */
 
-const COOPERS = {start: 100, end: 144, latitude: null, longitude: null};
+const COOPERS = {start: 100, end: 144};
 
 // The real configuration, not a fixture: a launch window nobody reads would be
 // worth nothing, and this is what catches it going missing.
@@ -33,8 +33,7 @@ function blowingFrom(degrees) {
 
 describe('reading a launch window out of configuration', () => {
     it('takes a pair of bearings', () => {
-        equal(launchWindow({start: 100, end: 144}),
-            {start: 100, end: 144, latitude: null, longitude: null});
+        equal(launchWindow({start: 100, end: 144}), {start: 100, end: 144});
     });
 
     it('wraps bearings written outside the circle', () => {
@@ -42,19 +41,10 @@ describe('reading a launch window out of configuration', () => {
         equal(launchWindow({start: 370, end: -10}).end, 350);
     });
 
-    it('takes the launch\'s own coordinates when it states them', () => {
-        const placed = launchWindow({start: 100, end: 144, latitude: 50.2856, longitude: -118.985967});
-
-        equal(placed.latitude, 50.2856);
-        equal(placed.longitude, -118.985967);
-    });
-
-    it('takes both coordinates or neither', () => {
-        // Half a coordinate is no place at all, and centring a map on it would
-        // put the launch somewhere it has never been.
-        equal(launchWindow({start: 100, end: 144, latitude: 50.2856}).latitude, null);
-        equal(launchWindow({start: 100, end: 144, longitude: -118.98}).longitude, null);
-        equal(launchWindow({start: 100, end: 144, latitude: 'up the hill', longitude: -118.98}).latitude, null);
+    it('is bearings and nothing else', () => {
+        // Where a station stands is the station's own business: every one of
+        // them has a position and only some of them face a direction.
+        equal(Object.keys(launchWindow({start: 100, end: 144})).sort().join(), 'end,start');
     });
 
     it('is no window at all when either bearing is missing or unreadable', () => {
@@ -143,11 +133,6 @@ describe('the launch, in the real site configuration', () => {
         equal(launch.launch.end, 144);
     });
 
-    it('states where the launch itself is, which is not where the station is', () => {
-        equal(launch.launch.latitude, 50.285548);
-        equal(launch.launch.longitude, -118.984665);
-    });
-
     it('is not claimed by the stations that are not launches', () => {
         ok(others.length, 'there are reference stations to check');
         others.forEach(station =>
@@ -230,5 +215,48 @@ describe('the arrow on the weather page', () => {
         // 180º off the bearing, red or blue.
         ok(arrow(244, COOPERS).includes('rotate(424deg)'));
         ok(arrow(122, COOPERS).includes('rotate(302deg)'));
+    });
+});
+
+describe('where each station stands', () => {
+    const stations = Object.fromEntries(site.stations.map(station => [station.shortName, station]));
+
+    it('is stated for every station the site configures', () => {
+        // The map behind the wind direction is centred on these, so a station
+        // added without one falls back to the position the API reports rather
+        // than going unmapped — but all three of ours are named here.
+        site.stations.forEach(station => {
+            ok(Number.isFinite(station.coordinates?.latitude), `${station.name} latitude`);
+            ok(Number.isFinite(station.coordinates?.longitude), `${station.name} longitude`);
+        });
+    });
+
+    it('puts each one where it actually is', () => {
+        equal(stations.Coopers.coordinates, {latitude: 50.285548, longitude: -118.984665});
+        equal(stations.FFP.coordinates, {latitude: 50.265725, longitude: -118.967077});
+        equal(stations.SilverStar.coordinates, {latitude: 50.36849, longitude: -119.063354});
+    });
+
+    it('is kept apart from the launch window, which only one of them has', () => {
+        // The reason the two are separate nodes: every station has a position,
+        // and a coordinate inside a launch node would be a coordinate two of
+        // these three had nowhere to put.
+        ok(stations.FFP.coordinates && !stations.FFP.launch, 'placed, but not a launch');
+        ok(stations.Coopers.coordinates && stations.Coopers.launch, 'and one that is both');
+    });
+
+    it('is nothing at all when the configuration says nothing', () => {
+        equal(sites.station({wunderground: 'IABCDEF1'}, 0).coordinates, null);
+    });
+
+    it('takes both halves or neither', () => {
+        // Half a coordinate would centre a map on a place the station has
+        // never been, which is worse than having no coordinate at all.
+        const placed = coordinates => sites.station({wunderground: 'A', coordinates}, 0).coordinates;
+
+        equal(placed({latitude: 50.28}), null);
+        equal(placed({longitude: -118.98}), null);
+        equal(placed({latitude: 'up the hill', longitude: -118.98}), null);
+        equal(placed({latitude: null, longitude: null}), null);
     });
 });

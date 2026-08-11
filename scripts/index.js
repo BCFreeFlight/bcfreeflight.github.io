@@ -62,13 +62,13 @@ export class Index {
      * valley the wind is coming up — and the ridge that is why the launch faces
      * the way it does is right there in the contours.
      *
-     * Centred on the launch when the configuration places one, and on the
-     * station's own reported position otherwise. That is the one thing on this
-     * page not taken from the instrument, and deliberately: the station is
+     * Centred on the configured coordinates when the site states them, and on
+     * the station's own reported position otherwise. That is the one thing on
+     * this page not taken from the instrument, and deliberately: a station is
      * sited where it can be serviced and where it reads the air cleanly, which
-     * at Cooper's is tens of metres off the launch itself. Every measurement
+     * at Cooper's is tens of metres off the takeoff itself. Every measurement
      * still belongs to the instrument. Only the photograph is recentred, on the
-     * ground someone is about to fly off.
+     * place people know by name.
      *
      * Only the frame is drawn here, carrying the coordinates it will be filled
      * from. The tiles themselves are someone else's servers, and they can wait
@@ -76,13 +76,13 @@ export class Index {
      * separate step rather than a dozen image elements in this string.
      *
      * @param {Object} observation - A station observation
-     * @param {?Object} [launch] - The station's launch, when it has one
+     * @param {?Object} [coordinates] - Where the site says the station stands
      * @returns {string} HTML markup, or nothing when there is no position to
      *     centre on
      */
-    renderWindMap(observation, launch = null) {
-        const latitude = launch?.latitude ?? observation?.lat;
-        const longitude = launch?.longitude ?? observation?.lon;
+    renderWindMap(observation, coordinates = null) {
+        const latitude = coordinates?.latitude ?? observation?.lat;
+        const longitude = coordinates?.longitude ?? observation?.lon;
 
         // Tested before conversion, deliberately: Number(null) is zero, and a
         // station that reports no longitude would otherwise be mapped to the
@@ -222,14 +222,14 @@ export class Index {
      *
      * @param {Object} wind - A shared wind reading
      * @param {Object} observation - The observation it was read from
-     * @param {?Object} [launch] - The station's launch, when it has one
+     * @param {?Object} [coordinates] - Where the site says the station stands
      * @returns {string} HTML markup
      */
-    renderWindRow(wind, observation, launch = null) {
+    renderWindRow(wind, observation, coordinates = null) {
         return `
                 <div class="wind-row">
                     <section class="wind-card wind-card--direction">
-                        ${this.renderWindMap(observation, launch)}
+                        ${this.renderWindMap(observation, coordinates)}
 
                         <span class="label"><span class="label-icon" aria-hidden="true">explore</span>Wind direction</span>
 
@@ -259,7 +259,7 @@ export class Index {
                 ${this.renderWindRow(
                     readings.wind(entry.observation, entry.station.launch),
                     entry.observation,
-                    entry.station.launch)}
+                    entry.station.coordinates)}
                 ${this.renderReadouts(entry.observation, entry.metrics, entry.air)}
                 ${trends.render(entry.station)}
             </div>`;
