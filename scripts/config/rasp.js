@@ -109,7 +109,9 @@ export const STRIPS = [
         key: 'cloud',
         label: 'Cloud',
         unit: '%',
-        colour: '#5b8bb5',
+        // The same pair the chart uses for these two, so a reader moving
+        // between the drawing and the chart is not relearning them.
+        colour: '#38bdf8',
         digits: 0,
         zeroed: true,
         // Always against the whole of it, so a scattered morning is not
@@ -126,7 +128,7 @@ export const STRIPS = [
         // pyranometer cannot actually tell you. See `lib/solar.js`.
         label: 'Shade',
         unit: '%',
-        colour: '#6b7280',
+        colour: '#3f3f46',
         digits: 0,
         zeroed: true,
         // A percentage, always drawn against the whole of it, so a thin haze is
