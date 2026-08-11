@@ -5,7 +5,7 @@ import {buildWindgram, FEET} from '../scripts/rasp.js';
 import {Windgram} from '../scripts/windgram.js';
 import {barbCounts, barbPath, PENNANT, MAXIMUM_FEATHERS, CALM_RINGS} from '../scripts/lib/barb.js';
 import {sunHeight, clearSky, shadeFraction} from '../scripts/lib/solar.js';
-import {temperatureAt, thermalTop, updraft, DRY_ADIABAT} from '../scripts/lib/thermal.js';
+import {temperatureAt, thermalTop, updraft, heatFlux, climbTop, DRY_ADIABAT, HEAT_FRACTION, GLIDER_SINK} from '../scripts/lib/thermal.js';
 import {CEILING, COLUMN_MS, STRIPS} from '../scripts/config/rasp.js';
 import {reveal} from '../scripts/lib/reveal.js';
 
@@ -112,6 +112,27 @@ function profile(lower, upper) {
             day: staged({temp: upper.temp, dewpt: upper.dewpt ?? -20, windSpeed: 12, windDir: 280})
         }
     ];
+}
+
+/**
+ * Renders a windgram offscreen and hands back its markup.
+ * @param {?Object} model - A model from buildWindgram
+ * @param {number} [width=900] - The width to draw at
+ * @returns {string} The markup
+ */
+function draw(model, width = 900) {
+    const host = document.createElement('div');
+    host.style.cssText = `width:${width}px;position:absolute;left:-9999px;top:0`;
+    document.body.appendChild(host);
+
+    const windgram = new Windgram(host);
+    windgram.setModel(model);
+
+    const markup = host.innerHTML;
+    windgram.destroy();
+    host.remove();
+
+    return markup;
 }
 
 describe('wind barbs', () => {
@@ -403,25 +424,82 @@ describe('how high a thermal gets', () => {
 });
 
 describe('how fast a thermal climbs', () => {
-    it('is nothing without sunlight', () => {
+    it('is nothing without heat going into the air', () => {
         equal(updraft(1500, 0, 25), 0);
     });
 
     it('is nothing without depth', () => {
-        equal(updraft(0, 800, 25), 0);
+        equal(updraft(0, 300, 25), 0);
     });
 
     it('is a believable climb rate on a good day', () => {
-        const rate = updraft(2000, 800, 28);
+        const rate = updraft(2000, 300, 28);
         ok(rate > 1 && rate < 5, `got ${rate} m/s`);
     });
 
     it('climbs faster through a deeper layer', () => {
-        ok(updraft(2000, 800, 25) > updraft(800, 800, 25));
+        ok(updraft(2000, 300, 25) > updraft(800, 300, 25));
     });
 
-    it('climbs faster under stronger sun', () => {
-        ok(updraft(1500, 900, 25) > updraft(1500, 300, 25));
+    it('climbs faster under a stronger heat flux', () => {
+        ok(updraft(1500, 400, 25) > updraft(1500, 120, 25));
+    });
+
+    it('climbs faster in the thinner air up a mountain', () => {
+        // Same heat, same layer: less air to lift means it goes up quicker.
+        ok(updraft(1500, 300, 25, 2000) > updraft(1500, 300, 25, 0));
+    });
+});
+
+describe('turning sunlight into heat', () => {
+    it('uses the constant share when nothing better is known', () => {
+        equal(heatFlux(800), HEAT_FRACTION * 800);
+    });
+
+    it('uses the share it is given when one is', () => {
+        equal(heatFlux(800, 0.5), 400);
+    });
+
+    it('has nothing to convert in the dark', () => {
+        equal(heatFlux(0), null);
+        equal(heatFlux(0, 0.5), null);
+    });
+});
+
+describe('the height a wing can still climb to', () => {
+    it('sits above the strongest part of the thermal and below the top', () => {
+        const top = climbTop(3000, 300, 3);
+        const depth = 3000 - 300;
+
+        // The profile peaks around a quarter of the way up and dies out at
+        // nine tenths, so the answer has to be between them.
+        ok(top > 300 + 0.25 * depth, `${top} should be above the peak`);
+        ok(top < 300 + 0.91 * depth, `${top} should be below where the climb dies out`);
+    });
+
+    it('is higher on a stronger day', () => {
+        ok(climbTop(3000, 300, 4) > climbTop(3000, 300, 1.5));
+    });
+
+    it('is nothing when the air never beats the glider', () => {
+        equal(climbTop(3000, 300, 0.2), null, 'a mean climb well under the sink rate');
+        equal(climbTop(3000, 300, 0), null);
+    });
+
+    it('is nothing when there is no layer to climb through', () => {
+        equal(climbTop(320, 300, 3), null);
+    });
+
+    it('gives way to a heavier wing', () => {
+        const light = climbTop(3000, 300, 3, {sink: 0.8});
+        const heavy = climbTop(3000, 300, 3, {sink: 1.5});
+
+        ok(heavy < light, 'a faster sink rate runs out of climb lower down');
+    });
+
+    it('uses the same sink rate the Canadian RASP does', () => {
+        equal(GLIDER_SINK, 1.0);
+        equal(climbTop(3000, 300, 3), climbTop(3000, 300, 3, {sink: GLIDER_SINK}));
     });
 });
 
@@ -640,26 +718,6 @@ describe('showing and hiding a piece of a drawing', () => {
 });
 
 describe('drawing it', () => {
-    /**
-     * Renders a windgram offscreen and hands back its markup.
-     * @param {?Object} model - A model from buildWindgram
-     * @param {number} [width=900] - The width to draw at
-     * @returns {string} The markup
-     */
-    function draw(model, width = 900) {
-        const host = document.createElement('div');
-        host.style.cssText = `width:${width}px;position:absolute;left:-9999px;top:0`;
-        document.body.appendChild(host);
-
-        const windgram = new Windgram(host);
-        windgram.setModel(model);
-
-        const markup = host.innerHTML;
-        windgram.destroy();
-        host.remove();
-
-        return markup;
-    }
 
     it('says so rather than drawing an empty frame with nothing to draw', () => {
         ok(draw(null).includes('chart-empty'));
@@ -762,7 +820,8 @@ describe('drawing it', () => {
     it('admits which numbers are worked out rather than measured', () => {
         const markup = draw(buildWindgram(real()));
         ok(markup.includes('extrapolated'), 'says the top of the drawing is a continuation');
-        ok(/[Ss]hade is how much/.test(markup), 'says what shade means');
+        ok(/[Ss]hade is measured/.test(markup), 'says shade came from a sensor');
+        ok(/[Cc]loud is modelled/.test(markup), 'and that cloud did not');
     });
 
     it('draws nothing above the ceiling it was given', () => {
@@ -800,5 +859,167 @@ describe('drawing it', () => {
 
         windgram.destroy();
         host.remove();
+    });
+});
+
+/**
+ * A modelled column of air above the stations, aligned to the staged day.
+ *
+ * Only ever heights above the top station: the point of the thing is that
+ * measurements win everywhere a station is standing.
+ *
+ * @param {Object} [options] - The levels, the cloud, and the share of sun that becomes heat
+ * @returns {Object} A model in the shape the sounding service hands over
+ */
+function sky({levels = [[1800, 8], [2400, 2], [3200, -6]], cloud = 40, share = 0.5, hours = 8} = {}) {
+    const times = Array.from({length: hours + 1}, (unused, index) => MIDNIGHT + index * 3600000);
+
+    return {
+        times,
+        levels: levels.map(([height, temp], index) => ({
+            pressure: 800 - index * 50,
+            heights: times.map(() => height),
+            temps: times.map(() => temp)
+        })),
+        cloud: times.map(() => cloud),
+        share: times.map(() => share)
+    };
+}
+
+// A hot valley under a cold hill: unstable enough that a parcel leaves the
+// measured column and keeps going, which is the only way to see what the
+// modelled air does to it.
+const SOARING = () => profile({temp: 30, solar: 800}, {temp: 10});
+
+/**
+ * The column at the middle of a staged day.
+ * @param {Object} model - A built windgram
+ * @returns {Object} One column
+ */
+function midday(model) {
+    return model.columns[Math.floor(model.columns.length / 2)];
+}
+
+describe('the air above the top station', () => {
+    it('is a continuation of one gradient when nothing else is offered', () => {
+        const model = buildWindgram(SOARING());
+
+        equal(model.modelledAloft, false);
+        ok(midday(model).above, 'the extrapolated slab is still drawn');
+    });
+
+    it('is the model, when there is one', () => {
+        const model = buildWindgram(SOARING(), sky());
+        const column = midday(model);
+
+        equal(model.modelledAloft, true);
+        equal(column.above, null, 'nothing left to extrapolate');
+        ok(column.segments.some(segment => segment.modelled), 'and the air up there says where it came from');
+    });
+
+    it('leaves the measured column alone', () => {
+        const model = buildWindgram(SOARING(), sky());
+        const column = midday(model);
+        const top = 5000 * FEET;
+
+        // Every station reading is still in the profile, and nothing modelled
+        // has been slipped in underneath the top station.
+        equal(column.levels.length, 2, 'both stations');
+        ok(column.profile.filter(level => level.modelled).every(level => level.elevation > top),
+            'the model only ever speaks above the last thermometer');
+    });
+
+    it('draws the modelled air knocked back, the way the guess was', () => {
+        const markup = draw(buildWindgram(SOARING(), sky()));
+        ok(markup.includes('windgram-extrapolated-edge'), 'the line where measurement stops is still drawn');
+    });
+
+    it('says in the footnotes which of the two it is', () => {
+        ok(/HRDPS/.test(draw(buildWindgram(SOARING(), sky()))), 'names the model when there is one');
+        ok(/extrapolated from the gradient/.test(draw(buildWindgram(SOARING()))), 'and admits the guess when there is not');
+    });
+});
+
+describe('a thermal climbing into modelled air', () => {
+    it('keeps going through air the model says is unstable', () => {
+        const column = midday(buildWindgram(SOARING(), sky()));
+        ok(column.thermalTop > 5000 * FEET, 'the top is above the top station');
+    });
+
+    it('stops at an inversion the model knows about and the stations cannot', () => {
+        const cold = midday(buildWindgram(SOARING(), sky())).thermalTop;
+        // Same hillside, same sun — but warm air sitting on top of it.
+        const capped = midday(buildWindgram(SOARING(), sky({levels: [[1800, 25], [2400, 26], [3200, 24]]}))).thermalTop;
+
+        ok(capped < cold, `capped ${capped} should be under ${cold}`);
+        ok(capped > 5000 * FEET, 'though still above the stations');
+    });
+});
+
+describe('how high a wing actually climbs', () => {
+    it('is lower than where the bubble stops', () => {
+        const column = midday(buildWindgram(SOARING(), sky()));
+
+        ok(column.climbTop !== null, 'there is a usable climb');
+        ok(column.climbTop < column.thermalTop, `${column.climbTop} should be under ${column.thermalTop}`);
+    });
+
+    it('is nothing at all on a day that never climbs faster than a glider sinks', () => {
+        // Barely any sun, so the layer mean never beats the wing.
+        const weak = buildWindgram(profile({temp: 30, solar: 70}, {temp: 10}), sky({share: 0.03}));
+        equal(midday(weak).climbTop, null);
+    });
+
+    it('stops at cloudbase when there is cloud in the way', () => {
+        const column = midday(buildWindgram(
+            profile({temp: 30, dewpt: 26, solar: 800}, {temp: 10, dewpt: 6}), sky()));
+
+        equal(Math.round(column.climbTop), Math.round(column.cloudBase),
+            'the climb ends where the cloud starts');
+    });
+
+    it('is drawn under the thermal top, dashed', () => {
+        ok(draw(buildWindgram(SOARING(), sky())).includes('windgram-climb-line'));
+    });
+
+    it('is named in the footnotes, since two lines need telling apart', () => {
+        ok(/dashed line/.test(draw(buildWindgram(SOARING(), sky()))));
+    });
+});
+
+describe('where the strength of the day comes from', () => {
+    it('is the station\'s own sunlight, not the model\'s', () => {
+        const bright = midday(buildWindgram(profile({temp: 30, solar: 900}, {temp: 10}), sky())).lift;
+        const smoky = midday(buildWindgram(profile({temp: 30, solar: 300}, {temp: 10}), sky())).lift;
+
+        ok(bright > smoky, `${bright} should beat ${smoky}`);
+    });
+
+    it('takes only the share of it that becomes heat from the model', () => {
+        const dry = midday(buildWindgram(SOARING(), sky({share: 0.6}))).lift;
+        const wet = midday(buildWindgram(SOARING(), sky({share: 0.1}))).lift;
+
+        ok(dry > wet, 'ground that heats the air makes a stronger day than ground that evaporates');
+    });
+
+    it('falls back to the constant share when the model does not say', () => {
+        const column = midday(buildWindgram(SOARING(), sky({share: null})));
+        ok(column.lift > 0, 'still a climb rate');
+    });
+});
+
+describe('the cloud strip', () => {
+    it('carries the modelled cover', () => {
+        equal(midday(buildWindgram(SOARING(), sky({cloud: 65}))).cloud, 65);
+    });
+
+    it('is empty rather than zero when nothing is modelled', () => {
+        equal(midday(buildWindgram(SOARING())).cloud, null);
+    });
+
+    it('is drawn beside shade rather than instead of it', () => {
+        const markup = draw(buildWindgram(SOARING(), sky()));
+        ok(markup.includes('>Cloud<'), 'the modelled row');
+        ok(markup.includes('>Shade<'), 'and the measured one');
     });
 });

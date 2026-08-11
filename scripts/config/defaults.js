@@ -36,6 +36,10 @@ export const HISTORY_CACHE_SECONDS = 5 * 60;
 // from asking sixty times for the same number.
 export const AIR_CACHE_SECONDS = 30 * 60;
 
+// The modelled air above the stations, on the same reasoning and the same
+// hourly cadence.
+export const SOUNDING_CACHE_SECONDS = 30 * 60;
+
 // Checking the camera costs a hidden player, so it lags well behind the
 // readings rather than running with them.
 export const CAMERA_CHECK_MS = 5 * 60 * 1000;
@@ -79,6 +83,7 @@ export const STORAGE_KEYS = {
     // Keyed by place rather than by station, because the air does not belong to
     // any one of them: two stations on the same hillside read the same square.
     air: (latitude, longitude) => `air_quality_${latitude}_${longitude}`,
+    sounding: (latitude, longitude) => `sounding_${latitude}_${longitude}`,
     liveView: 'live_view_mode',
     liveWeather: 'live_weather_visible',
     trendSeries: 'trend_series',

@@ -106,6 +106,21 @@ export const STRIPS = [
         read: column => column.lift
     },
     {
+        key: 'cloud',
+        label: 'Cloud',
+        unit: '%',
+        colour: '#5b8bb5',
+        digits: 0,
+        zeroed: true,
+        // Always against the whole of it, so a scattered morning is not
+        // stretched up the strip to look like an overcast.
+        fixed: [0, 100],
+        // Modelled rather than sensed — this is the RASP's own cloud row, and
+        // nothing on the hillside is looking up.
+        estimated: true,
+        read: column => column.cloud
+    },
+    {
         key: 'shade',
         // Not "Cloud", which is what the RASP calls this row and what a
         // pyranometer cannot actually tell you. See `lib/solar.js`.
