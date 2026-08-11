@@ -1,7 +1,7 @@
 import history from './history.js';
 import air from './air.js';
 import sounding from './sounding.js';
-import {SERIES, AIR_SERIES} from './config/series.js';
+import {SERIES, AIR_SERIES, SKY_SERIES} from './config/series.js';
 import {STORAGE_KEYS} from './config/defaults.js';
 import {readJson, writeJson} from './lib/storage.js';
 import {Chart} from './chart.js';
@@ -9,6 +9,7 @@ import {Windgram} from './windgram.js';
 import {buildWindgram} from './rasp.js';
 import {lapsePairs, lapseColumn} from './lapse-series.js';
 import {airColumn} from './air-series.js';
+import {shadeColumn, cloudColumn} from './sky-series.js';
 
 /**
  * The day's readings, as a panel.
@@ -302,7 +303,7 @@ export class Trends {
      * @returns {Object[]} Series definitions
      */
     catalogue() {
-        return [...SERIES, ...this.pairs, AIR_SERIES];
+        return [...SERIES, ...this.pairs, AIR_SERIES, ...SKY_SERIES];
     }
 
     /**
@@ -336,6 +337,15 @@ export class Trends {
 
         const overhead = airColumn(this.airs.get(panel.station.key), day.times);
         if (overhead) values[AIR_SERIES.key] = overhead;
+
+        // What was between this station and the sun. Shade comes from its own
+        // pyranometer and needs to know where it was standing; cloud comes from
+        // the model over the same square.
+        const shade = shadeColumn(day, panel.latitude, panel.longitude);
+        if (shade) values.shade = shade;
+
+        const cloud = cloudColumn(this.aloft.get(panel.station.key), day.times);
+        if (cloud) values.cloud = cloud;
 
         return {...day, values};
     }

@@ -167,6 +167,52 @@ export const AIR_SERIES = {
 };
 
 /**
+ * What is between the station and the sun.
+ *
+ * Two answers to nearly the same question, which is why they share a panel and
+ * an axis: both are percentages, and reading them apart is the entire point.
+ * Shade is measured — how much of the sunlight that should be reaching the
+ * pyranometer is not — so it counts cloud, haze, wildfire smoke and the shadow
+ * of the ridge alike. Cloud is modelled, and counts only cloud.
+ *
+ * On a clear day the two lines sit together. When they separate, the gap is
+ * everything in the air that is not cloud, which in an Okanagan August is
+ * usually smoke. That gap is worth being able to see on the same chart as the
+ * temperature it is holding down.
+ *
+ * Neither is a station column, so both are assembled in `sky-series.js` rather
+ * than read out of a five-minute bucket.
+ *
+ * @type {Object[]}
+ */
+export const SKY_SERIES = [
+    {
+        key: 'shade',
+        floor: 0,
+        label: 'Shade',
+        unit: '%',
+        // Near-black against a bright sky blue. The two were a grey and a
+        // muted blue to begin with, which is the right idea and the wrong
+        // execution: at the width of a chart line they read as one colour in
+        // two moods. Separating them by lightness as well as hue is what makes
+        // the gap between measured and modelled legible at a glance — and that
+        // gap is the whole reason both are drawn.
+        colour: '#3f3f46',
+        group: 'sky',
+        digits: 0
+    },
+    {
+        key: 'cloud',
+        floor: 0,
+        label: 'Cloud cover',
+        unit: '%',
+        colour: '#38bdf8',
+        group: 'sky',
+        digits: 0
+    }
+];
+
+/**
  * The colours the lapse-rate lines cycle through. Kept apart from the station
  * measurements above because a lapse rate is not one: it belongs to a pair of
  * stations, and how many lines there are depends on how many are reporting.
