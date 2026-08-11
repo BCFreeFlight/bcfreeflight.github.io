@@ -3,7 +3,7 @@ import api, {RaspApi, FORECAST_LEVELS} from '../scripts/rasp-api.js';
 import {Forecast} from '../scripts/forecast.js';
 import {buildForecastWindgram} from '../scripts/rasp-model.js';
 import {Windgram} from '../scripts/windgram.js';
-import {FORECAST_STRIPS, FORECAST_CEILING, FORECAST_WINDOW} from '../scripts/config/rasp.js';
+import {FORECAST_STRIPS, FORECAST_CEILING, FORECAST_WINDOW, LAYOUT} from '../scripts/config/rasp.js';
 import {
     blDepth, dewpoint, updraft, virtualHeatFlux, LCL_PER_DEGREE, DRY_ADIABAT
 } from '../scripts/lib/thermal.js';
@@ -429,7 +429,20 @@ describe('building a forecast day', () => {
         const dusk = built.columns.at(-1);
 
         equal(dusk.thermalTop, null);
-        equal(dusk.lift, null);
+
+        // Zero rather than nothing. A gap in the lift strip is the drawing
+        // saying it does not know, and it breaks the fill into pieces — which
+        // is wrong for an evening, and was wrong for the hour an afternoon
+        // shower shut the thermals down.
+        equal(dusk.lift, 0);
+    });
+
+    it('leaves the lift unknown only when the flux is', async () => {
+        const shaped = await read({energy: null});
+        const built = buildForecastWindgram(shaped,
+            {day: 0, latitude: COOPERS.lat, longitude: COOPERS.lon});
+
+        equal(built.columns.every(column => column.lift === null), true);
     });
 
     it('leaves an hour the model lost as a gap', async () => {
@@ -511,6 +524,24 @@ describe('drawing the forecast', () => {
 
         ok(markup.includes('>07<'), 'the window opens at seven, not at zero');
         ok(markup.includes('>21<'), 'and closes at nine at night');
+    });
+
+    it('never puts a barb up among the strips', async () => {
+        // The top pressure level sits above the ceiling, and the strips sit
+        // above the panel. A barb that escapes lands in the rain row, which
+        // reads as weather rather than as a mistake — so the panel refuses to
+        // place one outside itself rather than trusting a clip to hide it.
+        const markup = draw(await model(0));
+        const panelTop = LAYOUT.top
+            + FORECAST_STRIPS.length * (LAYOUT.strip + LAYOUT.stripGap)
+            + LAYOUT.stripToPanel;
+
+        const placed = [...markup.matchAll(/translate\(([\d.]+) ([\d.]+)\)/g)]
+            .map(match => Number(match[2]));
+
+        ok(placed.length, 'there are barbs to check');
+        ok(placed.every(y => y >= panelTop),
+            `lowest barb at ${Math.min(...placed)} should be under ${panelTop}`);
     });
 
     it('has no shade strip, because a forecast has nothing to measure', () => {

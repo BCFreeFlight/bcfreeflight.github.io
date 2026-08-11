@@ -235,6 +235,39 @@ export const FORECAST_STRIPS = [
     }
 ];
 
+/**
+ * What the forecast has to admit about itself.
+ * @param {Object} model - The model being drawn
+ * @param {string} zone - The clock the hours are on
+ * @returns {string[]} The sentences to print, in order
+ */
+function forecastFootnotes(model, zone) {
+    return [
+        `Local lapse rate in ºC per 1000 ft. Wind barbs in km/h. Time${zone}. Ground level ${
+            Math.round(model.ground)} m asl.`,
+        'Forecast, not measured: every number here is from Environment Canada\'s HRDPS model, which is the model the Canadian RASP is built on, read at this launch\'s own coordinates.',
+        'Blue hatching is air within half a degree of its dew point. The solid line is where a thermal stops climbing; the dashed line under it is where the climb drops below a glider\'s own sink, and it stops at cloudbase.',
+        'Thermals are released from the ground temperature the model forecasts, with no trigger offset, and the climb rate uses the model\'s own surface heat fluxes — the same method the RASP uses, with the same constants.'
+    ];
+}
+
+/**
+ * How the forecast windgram differs from the measured one, as settings.
+ *
+ * Only four things do. There is no shade strip because a forecast has no
+ * pyranometer to miss; the barbs sit lower because there are no station rules
+ * for them to clear, only the ground; the empty state is about a day rather
+ * than a log; and the footnotes have an entirely different confession to make.
+ *
+ * @type {Object}
+ */
+export const FORECAST_VIEW = {
+    strips: FORECAST_STRIPS,
+    barbOffsetFeet: 200,
+    empty: 'No forecast for this day yet.',
+    footnotes: forecastFootnotes
+};
+
 /** Isotherms are drawn every this many degrees, the way the RASP does. */
 export const ISOTHERM_STEP = 5;
 

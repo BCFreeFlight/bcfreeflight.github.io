@@ -98,5 +98,9 @@ export const STORAGE_KEYS = {
     liveView: 'live_view_mode',
     liveWeather: 'live_weather_visible',
     trendSeries: 'trend_series',
-    trendMode: 'trend_mode'
+    trendMode: 'trend_mode',
+    windgramDay: 'windgram_day',
+    // Per site, because which station a reader watches is a property of the
+    // hill they fly, not of the browser.
+    station: slug => `station_${slug}`
 };

@@ -7,6 +7,9 @@ import {readJson, writeJson} from './lib/storage.js';
 import {Chart} from './chart.js';
 import {Windgram} from './windgram.js';
 import {buildWindgram} from './rasp.js';
+import {buildForecastWindgram} from './rasp-model.js';
+import {FORECAST_VIEW} from './config/rasp.js';
+import forecast from './forecast.js';
 import {lapsePairs, lapseColumn} from './lapse-series.js';
 import {airColumn} from './air-series.js';
 import {sunTimes} from './lib/solar.js';
@@ -37,8 +40,10 @@ export class Trends {
         this.airs = new Map();
         this.aloft = new Map();
         this.pairs = [];
+        this.forecasts = null;
         this.selected = readJson(STORAGE_KEYS.trendSeries, null);
         this.mode = readJson(STORAGE_KEYS.trendMode, 'split');
+        this.day = readJson(STORAGE_KEYS.windgramDay, 'live');
     }
 
     /**
@@ -56,7 +61,7 @@ export class Trends {
             <section class="trend" data-trend="${station.key}">
                 <div class="trend-head">
                     <span class="label">
-                        <span class="label-icon" aria-hidden="true">show_chart</span>Today so far
+                        <span class="label-icon" aria-hidden="true">show_chart</span>Charts
                     </span>
 
                     <div class="trend-controls">
@@ -72,23 +77,56 @@ export class Trends {
                                  aria-label="Measurements" hidden></div>
                         </div>
 
-                        <div class="trend-modes" role="group" aria-label="Chart layout">
+                        <div class="trend-modes trend-layout" role="group" aria-label="Chart layout">
                             <button class="trend-mode" type="button" data-mode="split"
                                     aria-pressed="${this.mode === 'split'}">Stacked</button>
                             <button class="trend-mode" type="button" data-mode="combined"
                                     aria-pressed="${this.mode === 'combined'}">Overlay</button>
                             <button class="trend-mode" type="button" data-mode="windgram"
-                                    aria-pressed="${this.mode === 'windgram'}">Windgram</button>
+                                    aria-pressed="${this.mode === 'windgram'}">Windgrams</button>
                         </div>
                     </div>
                 </div>
 
                 <p class="trend-sun" hidden></p>
+                ${station.isDefault ? this.renderDays() : ''}
 
                 <div class="chart-host"></div>
                 <div class="windgram-host" hidden></div>
+                ${station.isDefault ? '<div class="forecast-host" hidden></div>' : ''}
                 <p class="trend-note">Reading today's log…</p>
             </section>`;
+    }
+
+    /**
+     * Which day the windgram is drawing.
+     *
+     * Sits under the sunrise line rather than up beside the layout buttons.
+     * Those pick how the day is drawn and are always there; this picks *which*
+     * day, only appears in windgram mode, and belongs next to the drawing it
+     * changes rather than in a row that would reflow every time the mode did.
+     *
+     * Only on the launch's own panel. The forecast is read for one point and
+     * every station on the hillside sits in the same square, so putting this on
+     * all three would offer three copies of one drawing as though they were
+     * three forecasts that happened to agree.
+     *
+     * @returns {string} HTML markup
+     */
+    renderDays() {
+        const days = [
+            {key: 'live', label: 'Live', title: 'Today so far, from the stations'},
+            {key: 'today', label: 'Today', title: 'Forecast for today'},
+            {key: 'tomorrow', label: 'Tomorrow', title: 'Forecast for tomorrow'}
+        ];
+
+        return `
+            <div class="trend-days" role="group" aria-label="Windgram day" hidden>
+                ${days.map(day => `
+                    <button class="trend-day" type="button" data-day="${day.key}"
+                            aria-label="${day.title}"
+                            aria-pressed="${this.day === day.key}">${day.label}</button>`).join('')}
+            </div>`;
     }
 
     /**
@@ -106,6 +144,7 @@ export class Trends {
         this.panels.forEach(panel => {
             panel.chart.destroy();
             panel.windgram.destroy();
+            panel.forecast?.destroy();
             // These are on the document, not the panel, so they outlive the
             // markup they were bound for unless they are taken off by hand.
             document.removeEventListener('pointerdown', panel.dismiss);
@@ -118,6 +157,8 @@ export class Trends {
             const host = document.querySelector(`.trend[data-trend="${entry.station.key}"]`);
             if (!host) return;
 
+            const forecastHost = host.querySelector('.forecast-host');
+
             const panel = {
                 station: entry.station,
                 elevation: Number(entry.observation?.uk_hybrid?.elev),
@@ -127,7 +168,9 @@ export class Trends {
                 longitude: Number(entry.observation?.lon),
                 host,
                 chart: new Chart(host.querySelector('.chart-host')),
-                windgram: new Windgram(host.querySelector('.windgram-host'))
+                windgram: new Windgram(host.querySelector('.windgram-host')),
+                // Only the launch has one, so only the launch offers the days.
+                forecast: forecastHost ? new Windgram(forecastHost, FORECAST_VIEW) : null
             };
 
             this.panels.set(entry.station.key, panel);
@@ -189,6 +232,39 @@ export class Trends {
         })), launch ? this.aloft.get(launch.station.key) ?? null : null);
 
         this.panels.forEach(panel => this.apply(panel));
+
+        // Deliberately not awaited. The measured drawing is the one most
+        // readers want and it is ready now; the forecast is a second pair of
+        // requests and it can fill in behind them.
+        this.loadForecast();
+    }
+
+    /**
+     * Reads the forecast for the launch and builds both of its days.
+     *
+     * Asked about the launch's own coordinates from the site's configuration
+     * rather than the ones Weather Underground holds for the sensor: the
+     * response carries the terrain height of the point it was asked about, and
+     * that height is the ground the whole forecast drawing sits on.
+     *
+     * @returns {Promise<void>}
+     */
+    async loadForecast() {
+        const panel = [...this.panels.values()].find(entry => entry.forecast);
+        if (!panel) return;
+
+        const named = panel.station.coordinates;
+        const latitude = named?.latitude ?? panel.latitude;
+        const longitude = named?.longitude ?? panel.longitude;
+
+        const read = await forecast.load(latitude, longitude);
+
+        this.forecasts = {
+            today: buildForecastWindgram(read, {day: 0, latitude, longitude}),
+            tomorrow: buildForecastWindgram(read, {day: 1, latitude, longitude})
+        };
+
+        this.panels.forEach(entry => this.apply(entry));
     }
 
     /**
@@ -218,6 +294,7 @@ export class Trends {
         const panel = this.panels.get(key);
         panel?.chart.scheduleDraw();
         panel?.windgram.scheduleDraw();
+        panel?.forecast?.scheduleDraw();
     }
 
     /**
@@ -273,12 +350,21 @@ export class Trends {
             this.panels.forEach(other => this.apply(other));
         });
 
-        panel.host.querySelector('.trend-modes').addEventListener('click', event => {
+        panel.host.querySelector('.trend-layout').addEventListener('click', event => {
             const button = event.target.closest('.trend-mode');
             if (!button) return;
 
             this.mode = button.dataset.mode;
             writeJson(STORAGE_KEYS.trendMode, this.mode);
+            this.panels.forEach(other => this.apply(other));
+        });
+
+        panel.host.querySelector('.trend-days')?.addEventListener('click', event => {
+            const button = event.target.closest('.trend-day');
+            if (!button) return;
+
+            this.day = button.dataset.day;
+            writeJson(STORAGE_KEYS.windgramDay, this.day);
             this.panels.forEach(other => this.apply(other));
         });
     }
@@ -423,13 +509,26 @@ export class Trends {
         // the picker rather than leaving a control that changes nothing.
         const profile = this.mode === 'windgram';
 
+        // A panel with no forecast of its own only ever draws what was
+        // measured, whichever day is chosen on the launch's panel.
+        const drawing = panel.forecast ? this.day : 'live';
+        const ahead = profile && drawing !== 'live';
+
         panel.host.querySelector('.chart-host').hidden = profile;
-        panel.host.querySelector('.windgram-host').hidden = !profile;
+        panel.host.querySelector('.windgram-host').hidden = !profile || ahead;
         panel.host.querySelector('.trend-picker').hidden = profile;
+
+        const days = panel.host.querySelector('.trend-days');
+        if (days) days.hidden = !profile;
+
+        const forecastHost = panel.host.querySelector('.forecast-host');
+        if (forecastHost) forecastHost.hidden = !ahead;
 
         if (profile) {
             this.setMenu(panel, false);
-            panel.windgram.setModel(this.windgram);
+
+            if (ahead) panel.forecast.setModel(this.forecasts?.[drawing] ?? null);
+            else panel.windgram.setModel(this.windgram);
         }
 
         const available = this.catalogue().filter(series =>
@@ -462,8 +561,12 @@ export class Trends {
 
         // The buttons are written once with the markup, so the pressed one is
         // put back in step here whenever the choice changes.
-        panel.host.querySelectorAll('.trend-mode').forEach(button => {
+        panel.host.querySelectorAll('.trend-layout .trend-mode').forEach(button => {
             button.setAttribute('aria-pressed', String(button.dataset.mode === this.mode));
+        });
+
+        panel.host.querySelectorAll('.trend-day').forEach(button => {
+            button.setAttribute('aria-pressed', String(button.dataset.day === this.day));
         });
 
         panel.chart.setCatalogue(this.catalogue());
@@ -491,6 +594,15 @@ export class Trends {
         if (!day) return 'No readings logged for today yet.';
 
         if (this.mode === 'windgram') {
+            if (panel.forecast && this.day !== 'live') {
+                if (!this.forecasts) return 'Reading the forecast…';
+                if (!this.forecasts[this.day]) return 'No forecast for this day yet.';
+
+                return 'The same column of air, forecast rather than measured, from the HRDPS '
+                    + 'model the Canadian RASP is built on. Colour is stability, barbs are the '
+                    + 'wind aloft, and the glider marks how high a thermal would get.';
+            }
+
             if (!this.windgram) return 'Not enough logged today to draw the profile yet.';
 
             return this.windgram.stations.length < 2

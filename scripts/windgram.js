@@ -43,6 +43,17 @@ const HIT_RADIUS = 13;
 const TIP = {width: 78, height: 36, gap: 10};
 
 /**
+ * Counts drawings, so each can name its own patterns and clip.
+ *
+ * A page can hold more than one of these — the measured day and the forecast
+ * sit in the same panel — and `url(#id)` resolves against the whole document,
+ * not the SVG it was written in. Sharing an id meant the second drawing clipped
+ * itself to the first one's panel, which put its topmost barbs outside its own
+ * frame and into the strips above.
+ */
+let drawings = 0;
+
+/**
  * How finely the stability field is sampled, in pixels.
  *
  * A row per pixel down the panel, because the eye picks out a one-pixel jog in a
@@ -163,14 +174,12 @@ export class Windgram {
     constructor(host, options = {}) {
         this.host = host;
         this.model = null;
+        this.id = `windgram-${drawings += 1}`;
 
         this.strips = options.strips ?? STRIPS;
         this.barbOffsetFeet = options.barbOffsetFeet ?? BARB_OFFSET_FEET;
         this.empty = options.empty ?? 'Not enough logged today to draw the profile yet.';
-        // Only the forecast has the resolution to justify smoothing between its
-        // levels. See `renderStabilityField`.
-        this.smooth = options.smooth ?? false;
-        this.sentences = options.footnotes ?? (model => this.measuredFootnotes(model));
+        this.sentences = options.footnotes ?? ((model, zone) => this.measuredFootnotes(model, zone));
 
         this.redraw = () => this.draw();
 
@@ -237,10 +246,7 @@ export class Windgram {
      * @returns {string} An SVG path definition
      */
     path(points) {
-        if (this.smooth) return curveThrough(points);
-
-        return points.map((point, index) =>
-            `${index ? 'L' : 'M'}${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join('');
+        return curveThrough(points);
     }
 
     /**
@@ -326,15 +332,15 @@ export class Windgram {
      */
     defs() {
         return `<defs>
-            <pattern id="windgram-cloud" width="7" height="7" patternUnits="userSpaceOnUse"
+            <pattern id="${this.id}-cloud" width="7" height="7" patternUnits="userSpaceOnUse"
                      patternTransform="rotate(45)">
                 <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(30,58,138,.35)" stroke-width="2.2"></line>
             </pattern>
-            <pattern id="windgram-missing" width="8" height="8" patternUnits="userSpaceOnUse"
+            <pattern id="${this.id}-missing" width="8" height="8" patternUnits="userSpaceOnUse"
                      patternTransform="rotate(-45)">
                 <line x1="0" y1="0" x2="0" y2="8" stroke="rgba(22,32,43,.10)" stroke-width="3"></line>
             </pattern>
-            <clipPath id="windgram-panel">
+            <clipPath id="${this.id}-panel">
                 <rect x="${this.left}" y="${this.top}"
                       width="${this.right - this.left}" height="${this.bottom - this.top}"></rect>
             </clipPath>
@@ -464,9 +470,9 @@ export class Windgram {
         return `<g>
             <rect class="windgram-bed" x="${this.left}" y="${this.top}"
                   width="${this.right - this.left}" height="${this.bottom - this.top}"></rect>
-            <g clip-path="url(#windgram-panel)">
+            <g clip-path="url(#${this.id}-panel)">
                 ${this.renderMissing()}
-                ${this.renderStability()}
+                ${this.renderStabilityField()}
                 ${this.renderCloud()}
                 ${this.renderTerrain()}
                 ${this.renderIsotherms()}
@@ -481,45 +487,6 @@ export class Windgram {
         </g>`;
     }
 
-    /**
-     * The coloured air. One rectangle per slab per column, in the same palette
-     * the lapse tag and the live overlay use.
-     * @returns {string} SVG markup
-     */
-    renderStability() {
-        if (this.smooth && this.model.columns.length > 1) return this.renderStabilityField();
-
-        const width = this.columnWidth();
-
-        const cells = this.model.columns.map(column => {
-            const x = this.x(column.time) - width / 2;
-
-            return [...column.segments, column.above].filter(Boolean).map(slab => {
-                const colour = slab.band?.color;
-                if (!colour) return '';
-
-                const top = this.y(slab.to);
-                const height = this.y(slab.from) - top;
-
-                // Half a pixel of overlap, or antialiasing draws a pale seam
-                // between every pair of columns.
-                return `<rect x="${x.toFixed(1)}" y="${top.toFixed(1)}"
-                              width="${(width + 0.6).toFixed(1)}" height="${Math.max(0, height).toFixed(1)}"
-                              fill="${colour}"${
-                                  slab.extrapolated ? ` opacity="${EXTRAPOLATED_OPACITY}"` : ''}></rect>`;
-            }).join('');
-        }).join('');
-
-        // The line above which nothing was measured. Without it the faded air
-        // reads as haze rather than as the edge of what we know.
-        const top = this.model.stations.at(-1)?.elevation;
-
-        const boundary = top === undefined ? '' : `
-            <line class="windgram-extrapolated-edge" x1="${this.left}" x2="${this.right}"
-                  y1="${this.y(top).toFixed(1)}" y2="${this.y(top).toFixed(1)}"></line>`;
-
-        return `<g class="windgram-stability">${cells}${boundary}</g>`;
-    }
 
     /**
      * The coloured air, as a field rather than as a stack of blocks.
@@ -535,12 +502,18 @@ export class Windgram {
      * middle of that layer rather than as a property of the whole block, the
      * samples are interpolated in height and in time, and the result is
      * flood-filled by band. Nothing new is claimed — the samples are exactly the
-     * numbers the model published — but the picture between them is continuous,
+     * numbers behind the slabs — but the picture between them is continuous,
      * which is what the air actually is.
      *
-     * Only for the forecast. The measured drawing has three thermometers on a
-     * hillside, and smoothing between them would be drawing a resolution that
-     * was never there.
+     * The measured drawing gets the same treatment, and the objection to it is
+     * worth answering rather than dodging: three stations do not resolve the air
+     * between them. Neither did the blocks, though — a stack of hard-edged slabs
+     * claims the stability changes discontinuously at the exact height of a
+     * thermometer, which is a stronger claim than a gradient, not a weaker one.
+     * What genuinely must survive is the difference between air that was
+     * measured and air that was not, so the boundary between them is tracked
+     * through the field and everything above it is drawn knocked back, exactly
+     * as the slabs were.
      *
      * @returns {string} SVG markup
      */
@@ -554,6 +527,17 @@ export class Windgram {
                 .sort((a, b) => a.elevation - b.elevation);
 
             return points.length ? points : null;
+        });
+
+        // The height above which this column was never measured. On the
+        // forecast nothing is extrapolated and this sits at the ceiling, so the
+        // whole field is drawn solid.
+        const measured = columns.map(column => {
+            const solid = column.segments.filter(slab => !slab.extrapolated);
+
+            if (solid.length) return solid.at(-1).to;
+
+            return column.segments[0]?.from ?? this.model.floor;
         });
 
         const paintTop = this.top;
@@ -600,6 +584,8 @@ export class Windgram {
             const to = columns[index + 1]?.time ?? from;
             const share = to === from ? 0 : Math.min(1, Math.max(0, (time - from) / (to - from)));
 
+            const edge = (1 - share) * measured[index] + share * (measured[index + 1] ?? measured[index]);
+
             // Walked upward with a moving index into each profile rather than
             // searched per row, which is what makes a per-pixel field affordable.
             let low = 0;
@@ -614,13 +600,18 @@ export class Windgram {
                 const rate = (1 - share) * rateAtFrom(before, metres, low)
                     + share * rateAtFrom(after, metres, high);
 
-                grid[(rows - 1 - row) * cells + cell] = bandOf(rate);
+                // Band and whether it was measured, packed into one cell so the
+                // run-merging below breaks a run wherever either changes.
+                grid[(rows - 1 - row) * cells + cell] =
+                    bandOf(rate) + (metres > edge ? LAPSE.length : 0);
             }
         }
 
         // Merged along each row before anything is written out, so a band that
         // covers half the sky is a handful of rectangles rather than hundreds.
-        const runs = LAPSE.map(() => []);
+        // Twice as many buckets as bands: the measured half and the faded half
+        // of each are separate fills.
+        const runs = [...LAPSE, ...LAPSE].map(() => []);
 
         for (let row = 0; row < rows; row++) {
             let cell = 0;
@@ -646,11 +637,25 @@ export class Windgram {
             }
         }
 
-        const bands = runs.map((shapes, index) => shapes.length
-            ? `<path fill="${LAPSE[index].color}" d="${shapes.join('')}"></path>`
-            : '').join('');
+        const bands = runs.map((shapes, index) => {
+            if (!shapes.length) return '';
 
-        return `<g class="windgram-stability">${bands}</g>`;
+            const faded = index >= LAPSE.length;
+            const entry = LAPSE[index % LAPSE.length];
+
+            return `<path fill="${entry.color}"${
+                faded ? ` opacity="${EXTRAPOLATED_OPACITY}"` : ''} d="${shapes.join('')}"></path>`;
+        }).join('');
+
+        // The line above which nothing was measured. Without it the faded air
+        // reads as haze rather than as the edge of what we know.
+        const top = this.model.stations.at(-1)?.elevation;
+
+        const boundary = top === undefined ? '' : `
+            <line class="windgram-extrapolated-edge" x1="${this.left}" x2="${this.right}"
+                  y1="${this.y(top).toFixed(1)}" y2="${this.y(top).toFixed(1)}"></line>`;
+
+        return `<g class="windgram-stability">${bands}${boundary}</g>`;
     }
 
     /**
@@ -677,7 +682,7 @@ export class Windgram {
             return `<rect x="${x.toFixed(1)}" y="${top.toFixed(1)}"
                           width="${(width + 0.6).toFixed(1)}"
                           height="${Math.max(0, this.y(this.model.ground) - top).toFixed(1)}"
-                          fill="url(#windgram-missing)"></rect>`;
+                          fill="url(#${this.id}-missing)"></rect>`;
         }).join('');
 
         return `<g class="windgram-missing">${cells}</g>`;
@@ -699,7 +704,7 @@ export class Windgram {
 
                 return `<rect x="${x.toFixed(1)}" y="${top.toFixed(1)}"
                               width="${(width + 0.6).toFixed(1)}" height="${Math.max(0, height).toFixed(1)}"
-                              fill="url(#windgram-cloud)"></rect>`;
+                              fill="url(#${this.id}-cloud)"></rect>`;
             }).join('');
         }).join('');
 
@@ -877,6 +882,14 @@ export class Windgram {
                 // still belongs to the station's true height, which is where
                 // that rule is drawn.
                 const y = this.y(level.elevation + lift);
+
+                // A level above the ceiling, or below the floor, is air this
+                // panel does not draw. The clip would hide it either way, but
+                // nothing above the panel should depend on a clip being right:
+                // the strips sit up there, and a barb in the rain row is worse
+                // than a barb missing.
+                if (y < this.top || y > this.bottom) return;
+
                 const at = `${x.toFixed(1)} ${y.toFixed(1)}`;
 
                 const station = this.model.stations.find(entry => entry.key === level.key);

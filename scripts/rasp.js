@@ -2,6 +2,7 @@ import {COLUMN_MS, CEILING, GROUND_MARGIN, ISOTHERM_STEP, CLOUD_DEPRESSION} from
 import {LAPSE} from './config/bands.js';
 import {band, isNumber} from './lib/numbers.js';
 import {lapseRate, MINIMUM_GAP} from './lib/lapse.js';
+import {binomial} from './lib/smooth.js';
 import {sunHeight, clearSky, shadeFraction} from './lib/solar.js';
 import {temperatureAt, thermalTop, updraft, heatFlux, climbTop, LCL_PER_DEGREE} from './lib/thermal.js';
 import sounding from './sounding.js';
@@ -475,6 +476,23 @@ export function buildWindgram(entries, modelled = null) {
             clouds: levels.length ? cloudBands(levels, floor, levels.at(-1).elevation) : []
         });
     }
+
+    // The three lines that are crossings rather than readings, taken down the
+    // same way the forecast takes them and the RASP takes its own. Between two
+    // half-hourly columns the stations can disagree by a tenth of a degree,
+    // which is nothing as a temperature and several hundred metres as a thermal
+    // top — so the raw lines whipped up and down across a settled afternoon.
+    ['thermalTop', 'climbTop', 'cloudBase'].forEach(field => {
+        const smoothed = binomial(columns.map(column => column[field]));
+        columns.forEach((column, index) => { column[field] = smoothed[index]; });
+    });
+
+    // Cloudbase still ends the climb, whatever smoothing did to the pair.
+    columns.forEach(column => {
+        if (column.climbTop === null || column.cloudBase === null) return;
+
+        column.climbTop = Math.min(column.climbTop, column.cloudBase);
+    });
 
     return {
         dayStart,

@@ -1,5 +1,6 @@
 import {FORECAST_CEILING, FORECAST_COLUMN_MS, FORECAST_WINDOW, GROUND_MARGIN} from './config/rasp.js';
 import {isNumber} from './lib/numbers.js';
+import {binomial} from './lib/smooth.js';
 import {FEET, slab, cloudBands, isotherms} from './rasp.js';
 import {
     blDepth, climbTop, dewpoint, updraft, virtualHeatFlux, LCL_PER_DEGREE
@@ -36,34 +37,6 @@ const DAY = 24 * HOUR;
  * profile.
  */
 const ABOVE_GROUND = 10;
-
-/**
- * A smoothing pass over one series, gaps left as gaps.
- *
- * The 1-2-1 binomial filter the RASP runs over its own cloudbase and top-of-lift
- * rows. Both are thresholds — the height where one curve crosses another — so a
- * tenth of a degree of wobble in the profile steps them a hundred metres, and
- * left raw the two lines come out visibly jagged against a smooth day.
- *
- * Only these two. The stability bands and the barbs are values rather than
- * crossings, and smoothing those would be flattening the forecast.
- *
- * @param {Array<?number>} values - The series, in order
- * @returns {Array<?number>} The smoothed series
- */
-function smooth(values) {
-    return values.map((value, index) => {
-        if (value === null) return null;
-
-        const before = values[index - 1];
-        const after = values[index + 1];
-
-        if (before === null || before === undefined) return value;
-        if (after === null || after === undefined) return value;
-
-        return (before + 2 * value + after) / 4;
-    });
-}
 
 /**
  * The moment local midnight fell on the first day the forecast covers.
@@ -154,13 +127,11 @@ function buildColumn(forecast, index, ground, ceiling) {
     // model's own answer to the same question.
     const convecting = flux !== null && flux > 0;
 
-    const depth = convecting && temp !== null ? blDepth(temp, aloft, ground) : 0;
-
-    const lift = convecting && depth > 0
-        ? updraft(depth, flux, temp, ground, surface.pressure[index])
-        : null;
-
-    const thermalTop = depth > 0 ? ground + depth : null;
+    // Null means the hour is missing; zero means the hour was answered and
+    // nothing rises. Only the first should leave a gap in anything drawn.
+    const depth = flux === null || temp === null ? null
+        : convecting ? blDepth(temp, aloft, ground)
+            : 0;
 
     // Cloud base as a pilot works it out: the spread between temperature and
     // dew point at the ground, times the rate at which the two converge.
@@ -174,17 +145,14 @@ function buildColumn(forecast, index, ground, ceiling) {
         profile: measured,
         segments,
         above: null,
-        thermalTop,
-        // Left uncapped here and capped against cloudbase after both have been
-        // smoothed. Capping first put the climb line a few tens of metres above
-        // the cloudbase it is supposed to stop at, because smoothing two series
-        // separately does not keep the order between them.
-        climbTop: thermalTop !== null && lift !== null
-            ? climbTop(thermalTop, ground, lift)
-            : null,
+        // The climb and the two heights are all worked out from the depth, and
+        // only once it has been smoothed. See `buildForecastWindgram`.
+        depth,
+        flux,
+        temp,
+        pressure: surface.pressure[index],
         cloudBase: base !== null && base < ceiling ? base : null,
-        lift,
-        pressure: surface.seaLevel[index],
+        seaLevel: surface.seaLevel[index],
         cloud: surface.cloud[index],
         rain: surface.rain[index],
         shade: null,
@@ -226,17 +194,61 @@ export function buildForecastWindgram(forecast, {day = 0, latitude, longitude} =
     // model left, and the panel says so rather than showing an empty frame.
     if (!columns.some(column => column.segments.length)) return null;
 
-    ['cloudBase', 'climbTop'].forEach(field => {
-        const smoothed = smooth(columns.map(column => column[field]));
+    // Smoothed before anything is derived from them, rather than after.
+    //
+    // Both of these are crossings — the height where two curves meet — and a
+    // tenth of a degree of wobble in the profile steps them hundreds of metres.
+    // The RASP smooths its cloudbase and its top of lift for exactly that
+    // reason. This goes one step further back and smooths the layer depth
+    // itself, which is the input all three of the climb figures are built from,
+    // for two reasons.
+    //
+    // It is more consistent: smoothing the outputs separately let the climb
+    // line drift above the cloudbase it is supposed to stop at, because two
+    // series smoothed apart do not keep the order between them.
+    //
+    // And it draws the air the way the air behaves. An afternoon shower drops
+    // the ground temperature four degrees in an hour while the air aloft stays
+    // warm, so the parcel calculation reports a boundary layer that steps from
+    // three kilometres to nothing and back inside two hours. A real convective
+    // layer does not vanish and re-form on the hour — it thins, and it leaves a
+    // residual layer behind. Smoothing turns that cliff into the deep trough it
+    // really is, which still says "not four o'clock" without claiming the sky
+    // switched off.
+    ['depth', 'cloudBase'].forEach(field => {
+        const smoothed = binomial(columns.map(column => column[field]));
         columns.forEach((column, index) => { column[field] = smoothed[index]; });
     });
 
-    // Cloudbase ends the climb whatever the air above it is doing, so the two
-    // lines are put back in order once neither of them is moving any more.
     columns.forEach(column => {
-        if (column.climbTop === null || column.cloudBase === null) return;
+        const {depth, flux, temp, cloudBase} = column;
 
-        column.climbTop = Math.min(column.climbTop, column.cloudBase);
+        // Smoothing can carry a little depth into an hour whose ground has
+        // already stopped warming — the evening, most often. The flux is the
+        // gate on whether anything is rising at all, so it is tested here as
+        // well as before the depth was worked out.
+        const rising = flux !== null && flux > 0 && depth !== null && depth > 0;
+
+        // Nothing going up is a reading of zero, not a gap. A gap is the drawing
+        // saying it does not know, and it breaks the strip into pieces.
+        column.lift = depth === null ? null
+            : rising ? updraft(depth, flux, temp, ground, column.pressure)
+                : 0;
+
+        column.thermalTop = rising ? ground + depth : null;
+
+        const usable = column.thermalTop !== null && column.lift
+            ? climbTop(column.thermalTop, ground, column.lift)
+            : null;
+
+        // Cloudbase ends the climb whatever the air above it is doing.
+        column.climbTop = usable !== null && cloudBase !== null
+            ? Math.min(usable, cloudBase)
+            : usable;
+
+        // The strip wants the sea-level pressure; the physics wanted the
+        // surface one. Only the first is drawn.
+        column.pressure = column.seaLevel;
     });
 
     return {

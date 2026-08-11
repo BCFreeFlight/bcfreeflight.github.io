@@ -142,6 +142,18 @@ describe('storage keys', () => {
         equal(STORAGE_KEYS.liveWeather, 'live_weather_visible');
         equal(STORAGE_KEYS.trendSeries, 'trend_series');
         equal(STORAGE_KEYS.trendMode, 'trend_mode');
+        equal(STORAGE_KEYS.windgramDay, 'windgram_day');
+        equal(STORAGE_KEYS.station('coopers'), 'station_coopers');
+    });
+
+    it('has a key for everything a reader can choose', () => {
+        // Anything a reader sets by clicking should survive them closing the
+        // tab. If a new control is added without a key here, this is where it
+        // gets noticed.
+        ['liveView', 'liveWeather', 'trendSeries', 'trendMode', 'windgramDay']
+            .forEach(key => ok(typeof STORAGE_KEYS[key] === 'string', `${key} is stored`));
+
+        equal(typeof STORAGE_KEYS.station, 'function', 'the chosen station, per site');
     });
 });
 
