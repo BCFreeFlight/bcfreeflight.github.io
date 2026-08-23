@@ -132,7 +132,15 @@ function play(element, duration, draw) {
         const movement = {frame: 0, land, give: resolve};
 
         const frame = now => {
-            const progress = Math.min((now - started) / duration, 1);
+            // Clamped at both ends. A frame's timestamp is the moment the
+            // browser began drawing it, which can be *before* the reading of
+            // the clock a line above — the frame was already under way when
+            // the refresh landed in the middle of it. Left unclamped that is a
+            // negative progress, and the easing turns it into a value below the
+            // one the tile is counting up from: 23.7 ºC dips to 23.5 for a
+            // frame before it sets off for 31.4, and the arrow kicks backwards
+            // before it turns.
+            const progress = Math.min(Math.max((now - started) / duration, 0), 1);
 
             if (progress >= 1) {
                 running.delete(element);
