@@ -233,6 +233,48 @@ describe('reading a day that will not load', () => {
         forget();
     });
 
+    it('re-reads a day held past the staleness window, whatever it asked for', async () => {
+        forget();
+        const history = new History();
+
+        // Sixteen minutes old, against the half hour the reference stations
+        // ask for. Serving it again would have the page call the station
+        // offline on the strength of a reading it was itself refusing to
+        // renew — and the lapse rate that station feeds blanks for the rest
+        // of the half hour.
+        localStorage.setItem(STORAGE_KEYS.day('IVERNO71'), JSON.stringify({
+            fetchedAt: Date.now() - 16 * 60 * 1000,
+            day: {times: [1], values: {temp: [1]}, dayStart: 0, dayEnd: 1}
+        }));
+
+        await withFetch(() => response({body: goodDay}), async calls => {
+            await history.load('IVERNO71', 30 * 60);
+            equal(calls.length, 1, 'asked again');
+        });
+
+        forget();
+    });
+
+    it('still holds a reference station well past the bucket cadence', async () => {
+        forget();
+        const history = new History();
+
+        // Ten minutes old: past the five-minute floor, inside the cap. The
+        // point of the cap is to bound a long timeout, not to collapse every
+        // station onto the bucket cadence.
+        localStorage.setItem(STORAGE_KEYS.day('IVERNO71'), JSON.stringify({
+            fetchedAt: Date.now() - 10 * 60 * 1000,
+            day: {times: [1], values: {temp: [1]}, dayStart: 0, dayEnd: 1}
+        }));
+
+        await withFetch(() => { throw new Error('should not have been called'); }, async calls => {
+            ok(await history.load('IVERNO71', 30 * 60), 'served from cache');
+            equal(calls.length, 0);
+        });
+
+        forget();
+    });
+
     it('ignores a corrupted cached day', async () => {
         forget();
         localStorage.setItem(STORAGE_KEYS.day('ILUMBY7'), 'not json at all');

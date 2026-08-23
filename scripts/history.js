@@ -1,6 +1,6 @@
 import api from './wu-api.js';
 import {SERIES, observationFrom} from './config/series.js';
-import {HISTORY_CACHE_SECONDS, STORAGE_KEYS} from './config/defaults.js';
+import {HISTORY_CACHE_SECONDS, MAXIMUM_CACHE_SECONDS, STORAGE_KEYS} from './config/defaults.js';
 import {readJson, writeJson} from './lib/storage.js';
 import {isNumber} from './lib/numbers.js';
 
@@ -23,9 +23,11 @@ export class History {
      *
      * How long a day is held is the station's own setting: the launch being
      * watched comes back at the bucket cadence, and the reference stations that
-     * only feed the lapse rate are held for half an hour. Floored at the bucket
-     * cadence either way, because asking more often than the buckets arrive
-     * only re-reads the same hundred kilobytes of day.
+     * only feed the lapse rate are held longer. Floored at the bucket cadence,
+     * because asking more often than the buckets arrive only re-reads the same
+     * hundred kilobytes of day, and capped at MAXIMUM_CACHE_SECONDS, because a
+     * day held past the staleness window puts the station offline on the
+     * strength of a reading the page is itself refusing to renew.
      *
      * @param {string} stationId - The Weather Underground station id
      * @param {number} [cacheSeconds=HISTORY_CACHE_SECONDS] - The station's own timeout
@@ -35,7 +37,10 @@ export class History {
         const cacheKey = STORAGE_KEYS.day(stationId);
         const cached = readJson(cacheKey);
         const age = (Date.now() - (cached?.fetchedAt ?? 0)) / 1000;
-        const timeout = Math.max(cacheSeconds || 0, HISTORY_CACHE_SECONDS);
+        const timeout = Math.min(
+            Math.max(cacheSeconds || 0, HISTORY_CACHE_SECONDS),
+            MAXIMUM_CACHE_SECONDS
+        );
 
         if (cached?.day && age < timeout) {
             return cached.day;

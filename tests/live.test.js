@@ -1,6 +1,8 @@
 import {describe, it, equal, ok, fixture, freshenDay, withFetch, response} from './runner.js';
 import live from '../scripts/live.js';
 import sites from '../scripts/sites.js';
+import {History} from '../scripts/history.js';
+import {STORAGE_KEYS} from '../scripts/config/defaults.js';
 import {settle} from '../scripts/lib/animate.js';
 
 /**
@@ -163,6 +165,34 @@ describe('the live overlay', () => {
         try {
             equal(value(host, 'wind'), 'WSW 7.1 km/h', 'the station it speaks for is unaffected');
         } finally {
+            host.remove();
+        }
+    });
+
+    it('re-reads a reference station before its cached day goes stale', async () => {
+        const host = overlay();
+        const history = new History();
+
+        // Both reference stations, cached as they stood months ago and fetched
+        // sixteen minutes back. The half hour those stations ask for would
+        // serve that day again, and every bucket in it is far past the twenty
+        // minutes that puts a station offline: the pairs the lapse rate is
+        // drawn from would both vanish while the page refused to look again.
+        for (const id of ['ILUMBY8', 'IVERNO71']) {
+            await withFetch(() => response({body: days[id]}), () => history.load(id, 30 * 60));
+
+            const cached = JSON.parse(localStorage.getItem(STORAGE_KEYS.day(id)));
+            cached.fetchedAt = Date.now() - 16 * 60 * 1000;
+            localStorage.setItem(STORAGE_KEYS.day(id), JSON.stringify(cached));
+        }
+
+        try {
+            await withFetch(stationDays(), () => live.loadAndDisplayWeatherOverlay());
+            settle();
+
+            equal(host.querySelectorAll('.lapse-row').length, 2, 'both pairs still reporting');
+        } finally {
+            live.overlay.cancel();
             host.remove();
         }
     });

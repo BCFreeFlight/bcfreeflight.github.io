@@ -44,6 +44,15 @@ export const TILE_TRANSITION_MS = 2000;
 // the page all morning, correctly timestamped and entirely believed.
 export const OBSERVATION_STALE_SECONDS = 20 * 60;
 
+// The longest a day may be held before it is read again. A station judges its
+// own freshness from the newest bucket of the day in the cache, so a cache kept
+// longer than the staleness window makes the station declare itself offline
+// while the page is still refusing to refetch it: the reference stations were
+// held for thirty minutes, went stale at twenty, and the lapse rate they feed
+// blanked for the remaining ten out of every thirty. One bucket short of the
+// window, so the last cached day always has a live reading left in it.
+export const MAXIMUM_CACHE_SECONDS = OBSERVATION_STALE_SECONDS - HISTORY_CACHE_SECONDS;
+
 // Air quality is published hourly and moves slowly, so it is held far longer
 // than a station reading. Half an hour keeps a page that refreshes every minute
 // from asking sixty times for the same number.
