@@ -11,6 +11,7 @@ import {readJson, writeJson} from './lib/storage.js';
 import {MAP_CREDIT, MAP_FRAME, MAP_ZOOM, tileUrl} from './config/map.js';
 import {Loop} from './lib/loop.js';
 import {isNumber} from './lib/numbers.js';
+import {showAngle, showValue} from './lib/animate.js';
 import {mosaic, TILE} from './lib/tiles.js';
 
 const NO_READING = readings.NO_READING;
@@ -196,15 +197,17 @@ export class Index {
      * The secondary readings for one station, in reading order.
      *
      * Which tiles there are, and where each one's value comes from, is in the
-     * readouts configuration. This only knows how to draw one.
+     * readouts configuration. Read out here rather than inside the renderer
+     * because a refresh writes the same list into the tiles that are already on
+     * the page, and the two must not read the configuration differently.
      *
-     * @param {Object} observation - A station observation
+     * @param {?Object} observation - A station observation
      * @param {Object} metrics - Interpreted metrics for that same observation
      * @param {?Object} airQuality - The air over the station, when it is known
-     * @returns {string} HTML markup
+     * @returns {Object[]} One entry per tile: label, icon, value, unit and note
      */
-    renderReadouts(observation, metrics, airQuality) {
-        const readoutList = READOUTS.map(readout => ({
+    readoutValues(observation, metrics, airQuality) {
+        return READOUTS.map(readout => ({
             label: readout.label,
             icon: readout.icon,
             value: readout.read(observation, metrics, airQuality) ?? NO_READING,
@@ -213,6 +216,17 @@ export class Index {
                 : readout.unit,
             note: readout.note?.(observation, metrics, airQuality)
         }));
+    }
+
+    /**
+     * The readouts panel for one station.
+     * @param {?Object} observation - A station observation
+     * @param {Object} metrics - Its interpreted metrics
+     * @param {?Object} [airQuality] - The air over the station, when it is known
+     * @returns {string} HTML markup
+     */
+    renderReadouts(observation, metrics, airQuality) {
+        const readoutList = this.readoutValues(observation, metrics, airQuality);
 
         return `
             <section class="readouts">
@@ -230,6 +244,139 @@ export class Index {
      * @param {Object} entry - A station entry: station, observation, metrics
      * @returns {string} HTML markup
      */
+    /**
+     * Writes new readings into the tiles that are already on the page.
+     *
+     * The panel used to be replaced wholesale, which was simplest and made
+     * every value change between two frames. A tile that is thrown away cannot
+     * count to anything, so each one is now written into where it stands: the
+     * figure moves, and the wording and the unit beside it are set outright.
+     *
+     * The list is fixed by the readouts configuration — same tiles, same order,
+     * every time — so each one is found by its position rather than searched
+     * for by name.
+     *
+     * @param {Element} view - The station's panel
+     * @param {?Object} observation - A station observation
+     * @param {Object} metrics - Its interpreted metrics
+     * @param {?Object} [airQuality] - The air over the station, when it is known
+     * @returns {void}
+     */
+    updateReadouts(view, observation, metrics, airQuality) {
+        const tiles = view.querySelectorAll('.readout');
+        const values = this.readoutValues(observation, metrics, airQuality);
+
+        // A panel drawn from a different configuration is not one to write
+        // into. Should not happen, and rebuilding beats writing the humidity
+        // into the pressure.
+        if (tiles.length !== values.length) {
+            const readouts = view.querySelector('.readouts');
+            if (readouts) readouts.outerHTML = this.renderReadouts(observation, metrics, airQuality);
+            return;
+        }
+
+        values.forEach((item, index) => {
+            const tile = tiles[index];
+            const value = tile.querySelector('.readout-value');
+
+            if (value) {
+                showValue(value, item.value);
+                value.classList.toggle('is-empty', item.value === NO_READING);
+                this.setUnit(value, item.unit);
+            }
+
+            this.setNote(tile, item.note);
+        });
+    }
+
+    /**
+     * The unit beside a reading, which comes and goes with the reading.
+     *
+     * A station that stops reporting its pressure shows a dash, and "— kPa"
+     * reads as a measurement where "—" reads as a missing one.
+     *
+     * @param {Element} value - The element holding the reading
+     * @param {?string} unit - The unit, when there is a reading to put it on
+     * @returns {void}
+     */
+    setUnit(value, unit) {
+        const existing = value.querySelector('.unit');
+
+        if (!unit) {
+            existing?.remove();
+            return;
+        }
+
+        if (existing) {
+            existing.textContent = unit;
+            return;
+        }
+
+        value.insertAdjacentHTML('beforeend', `<span class="unit">${unit}</span>`);
+    }
+
+    /**
+     * The wording under a reading, which not every tile carries.
+     * @param {Element} tile - The readout
+     * @param {?string} note - The wording, when there is one
+     * @returns {void}
+     */
+    setNote(tile, note) {
+        const existing = tile.querySelector('.readout-note');
+
+        if (!note) {
+            existing?.remove();
+            return;
+        }
+
+        if (existing) {
+            existing.textContent = note;
+            return;
+        }
+
+        tile.insertAdjacentHTML('beforeend', `<p class="readout-note">${note}</p>`);
+    }
+
+    /**
+     * Writes the lapse rate into the tag beside the tabs.
+     *
+     * Rebuilt rather than written into when the segments themselves change —
+     * a station dropping out repairs the stack into different pairs, and there
+     * is no sense counting the rate of one pair towards the rate of another.
+     * While the same pairs are reporting, only their figures move.
+     *
+     * @param {Object[]} loaded - Station entries from Weather.loadStations
+     * @returns {void}
+     */
+    updateLapseTag(loaded) {
+        const tag = document.querySelector('.lapse-tag');
+        if (!tag) return;
+
+        const segments = readings.lapseSegments(loaded);
+        const rows = tag.querySelectorAll('.lapse-segment');
+        // With no segments there is no stack to write into — the tag is showing
+        // which stations are missing instead, and which those are can change
+        // without any pair appearing.
+        const sameStack = segments.length > 0
+            && rows.length === segments.length
+            && segments.every((segment, index) =>
+                rows[index].querySelector('.lapse-span')?.textContent === segment.span);
+
+        if (!sameStack) {
+            tag.outerHTML = this.renderLapseTag(loaded);
+            return;
+        }
+
+        segments.forEach((segment, index) => {
+            const row = rows[index];
+
+            showValue(row.querySelector('.lapse-figure'), segment.rate.toFixed(2));
+            row.querySelector('.lapse-gap').textContent = `${segment.elevDiff.toLocaleString()} ft`;
+            row.querySelector('.lapse-swatch').style.background = segment.colour;
+            row.title = `${segment.name}: ${segment.description}`;
+        });
+    }
+
     /**
      * The two wind tiles: which way it is blowing, and how hard.
      *
@@ -346,8 +493,7 @@ export class Index {
      * @returns {void}
      */
     updateInPlace(loaded) {
-        const lapse = document.querySelector('.lapse-tag');
-        if (lapse) lapse.outerHTML = this.renderLapseTag(loaded);
+        this.updateLapseTag(loaded);
 
         loaded.forEach(entry => {
             const key = entry.station.key;
@@ -364,8 +510,7 @@ export class Index {
 
             this.updateWind(view, readings.wind(entry.observation, entry.station.launch));
 
-            const readouts = view.querySelector('.readouts');
-            if (readouts) readouts.outerHTML = this.renderReadouts(entry.observation, entry.metrics, entry.air);
+            this.updateReadouts(view, entry.observation, entry.metrics, entry.air);
         });
 
         // The charts read their own day on their own cadence; this asks them to
@@ -388,26 +533,58 @@ export class Index {
      * @returns {void}
      */
     updateWind(view, wind) {
-        const arrow = view.querySelector('.wind-arrow');
-        if (arrow) arrow.outerHTML = this.renderWindArrow(wind);
+        this.turnWindArrow(view.querySelector('.wind-arrow'), wind);
 
+        // The compass point is a word, not a number: there is no halfway
+        // between WSW and W, so it changes when the arrow sets off rather than
+        // when it arrives.
         const cardinal = view.querySelector('.wind-cardinal');
         if (cardinal) cardinal.textContent = wind.cardinal;
 
-        const speed = view.querySelector('.wind-speed');
-        if (speed) speed.innerHTML = `${wind.speed}<span class="unit">km/h</span>`;
+        showValue(view.querySelector('.wind-speed'), wind.speed);
 
-        // The gust line comes and goes with the gust, so it is replaced rather
-        // than rewritten: there may be no element there to write into.
+        // The gust line comes and goes with the gust. While it is there it is
+        // written into, so the figure counts like every other; when it arrives
+        // or leaves there is nothing to count between.
         const card = view.querySelector('.wind-card--speed');
         const gust = view.querySelector('.wind-gust');
 
-        if (gust) gust.remove();
+        if (gust && wind.gusting) {
+            showValue(gust.querySelector('strong'), `${wind.gust} km/h`);
+            return;
+        }
+
+        gust?.remove();
 
         if (card && wind.gusting) {
             card.insertAdjacentHTML('beforeend',
                 `<p class="wind-gust">Gusting to <strong>${wind.gust} km/h</strong></p>`);
         }
+    }
+
+    /**
+     * Turns the arrow to the new wind, and says so.
+     *
+     * Turned rather than redrawn: the same element stays on the page so it can
+     * move to the bearing instead of appearing at it. The wording and the
+     * off-launch colour are set outright, because both are answers about where
+     * the wind is now rather than about where it is going.
+     *
+     * @param {?Element} arrow - The arrow, when the panel has one
+     * @param {Object} wind - A shared wind reading
+     * @returns {void}
+     */
+    turnWindArrow(arrow, wind) {
+        if (!arrow) return;
+
+        const offLaunch = wind.onLaunch === false;
+        const direction = wind.cardinalWords ?? 'unknown direction';
+
+        arrow.classList.toggle('is-off-launch', offLaunch);
+        arrow.setAttribute('aria-label', `Wind from the ${direction}${
+            offLaunch ? ', outside the launch direction' : ''}`);
+
+        showAngle(arrow, wind.rotation);
     }
 
     /**

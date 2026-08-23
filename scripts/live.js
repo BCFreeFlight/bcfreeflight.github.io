@@ -11,6 +11,7 @@ import {
 } from './config/defaults.js';
 import {readText, writeText} from './lib/storage.js';
 import {Loop} from './lib/loop.js';
+import {showAngle, showValue} from './lib/animate.js';
 
 /**
  * Class for handling live page functionality
@@ -249,7 +250,9 @@ export class Live {
         const tile = document.querySelector(selector);
         if (!tile) return;
 
-        tile.querySelector('.weather-value').textContent = value;
+        // The figure counts to its new value; the wording around it — the
+        // compass point in front, the unit behind — is written as it stands.
+        showValue(tile.querySelector('.weather-value'), value);
 
         if (title !== null) {
             tile.querySelector('.weather-title').textContent = title;
@@ -283,8 +286,7 @@ export class Live {
             // The rotation already accounts for the wind blowing *from* the
             // cardinal shown, so the arrow points away from it.
             this.setReading('#wind', wind.summary, wind.gustSummary);
-            document.querySelector('#wind .weather-icon').style =
-                `transform: rotate(${wind.rotation}deg);`;
+            showAngle(document.querySelector('#wind .weather-icon'), wind.rotation);
 
             this.setReading('#temperature', readings.temperature(observation).summary,
                 `Temperature at ${primary.station.name}`);
@@ -299,6 +301,34 @@ export class Live {
     }
 
     /**
+     * Writes the rates into the rows already on the overlay.
+     *
+     * @param {Element} overlay - The weather overlay
+     * @param {Object[]} segments - One per adjacent pair of stations
+     * @returns {boolean} Whether the tile was written into rather than rebuilt
+     */
+    updateLapseRows(overlay, segments) {
+        const rows = overlay.querySelectorAll('.weather-item--lapse .lapse-row');
+
+        const sameStack = segments.length > 0
+            && rows.length === segments.length
+            && segments.every((segment, index) =>
+                rows[index].querySelector('.lapse-leg')?.textContent === segment.span);
+
+        if (!sameStack) return false;
+
+        segments.forEach((segment, index) => {
+            const row = rows[index];
+
+            showValue(row.querySelector('.lapse-rate'), String(segment.rate));
+            row.querySelector('.lapse-chip').style.background = segment.colour;
+            row.title = `${segment.name}: ${segment.description}`;
+        });
+
+        return true;
+    }
+
+    /**
      * Draws the lapse rate as a single tile, with one row per segment stacked
      * inside it. Keeping it to one tile matches the weather page and stops the
      * overlay from growing a column every time a station is added.
@@ -308,6 +338,12 @@ export class Live {
     renderLapseTile(segments) {
         const overlay = document.getElementById('weather-overlay');
         if (!overlay) return;
+
+        // While the same pairs are reporting, the rates are written into the
+        // rows that are already there so each one can count to its new value. A
+        // station dropping out repairs the stack into different pairs, and
+        // there the tile is rebuilt: there is nothing to count between.
+        if (this.updateLapseRows(overlay, segments)) return;
 
         overlay.querySelectorAll('.weather-item--lapse').forEach(tile => tile.remove());
 

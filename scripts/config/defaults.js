@@ -32,6 +32,11 @@ export const RETRY_MS = 60 * 1000;
 // and the default for a caller that does not name one.
 export const HISTORY_CACHE_SECONDS = 5 * 60;
 
+// How long a tile takes to move to a new value: a number counting to it, an
+// arrow turning to it. Long enough to be caught out of the corner of an eye on
+// a screen at a launch, short enough to be over well before the next read.
+export const TILE_TRANSITION_MS = 2000;
+
 // When a station counts as having stopped rather than as being between
 // readings. Four missed buckets: one late bucket is ordinary, twenty minutes of
 // silence is not. Until the readings moved onto the day there was no staleness
