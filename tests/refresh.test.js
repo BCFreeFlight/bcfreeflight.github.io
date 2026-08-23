@@ -2,6 +2,7 @@ import {describe, it, equal, ok, fixture} from './runner.js';
 import index from '../scripts/index.js';
 import trends from '../scripts/trends.js';
 import weather from '../scripts/weather.js';
+import {settle} from '../scripts/lib/animate.js';
 import {observationFrom} from '../scripts/config/series.js';
 
 /**
@@ -52,6 +53,22 @@ function entry(id, {online = true, day = A_DAY, observation = observations[id]} 
 }
 
 const three = () => [entry('ILUMBY7'), entry('ILUMBY8'), entry('IVERNO71')];
+
+/**
+ * Refreshes the page and lands every tile on its new value.
+ *
+ * A tile counts to its reading over two seconds now, so a test that looks
+ * straight after a refresh sees a number on its way rather than the one it was
+ * going to. What is being checked here is where they arrive; the counting
+ * itself has its own tests.
+ *
+ * @param {Object[]} loaded - Station entries
+ * @returns {void}
+ */
+function refresh(loaded) {
+    index.updateInPlace(loaded);
+    settle();
+}
 
 /**
  * Builds the page the way a first load does, into a detached container.
@@ -107,10 +124,86 @@ describe('refreshing in place', () => {
         warmer[0].observation = {...observations.ILUMBY7, uk_hybrid: {...observations.ILUMBY7.uk_hybrid, temp: 31.4}};
         warmer[0].metrics = weather.describeObservation(warmer[0].observation);
 
-        index.updateInPlace(warmer);
+        refresh(warmer);
 
         const value = host.querySelector('.view[data-view="ilumby7"] .readout-value').textContent;
         ok(value.startsWith('31.4'), `temperature became ${value}`);
+
+        host.remove();
+    });
+
+    it('moves a reading to its new value rather than swapping it', async () => {
+        // Not settled: the point is that a refresh leaves the tile counting.
+        // Replacing a panel wholesale would land every value in one frame, and
+        // this is what would notice if that came back.
+        const host = build(three());
+
+        const warmer = three();
+        warmer[0].observation = {...observations.ILUMBY7, uk_hybrid: {...observations.ILUMBY7.uk_hybrid, temp: 31.4}};
+        warmer[0].metrics = weather.describeObservation(warmer[0].observation, METRES.ILUMBY7);
+
+        index.updateInPlace(warmer);
+
+        const value = host.querySelector('.view[data-view="ilumby7"] .readout-value');
+        let partway = value.textContent;
+
+        for (let frame = 0; frame < 60 && partway.startsWith('23.7'); frame++) {
+            await new Promise(requestAnimationFrame);
+            partway = value.textContent;
+        }
+
+        settle();
+
+        const reached = Number.parseFloat(partway);
+        ok(reached > 23.7 && reached < 31.4, `counting past ${partway}`);
+        ok(value.textContent.startsWith('31.4'), 'and it lands on the reading');
+
+        host.remove();
+    });
+
+    it('renames the stations the lapse rate is waiting on', () => {
+        // No pair either side of the refresh, so there is no stack to write
+        // into — but which stations are missing has changed, and the tag says
+        // so rather than keeping the name it had.
+        const host = build(three());
+
+        refresh([
+            entry('ILUMBY7', {online: false}),
+            entry('ILUMBY8', {online: false}),
+            entry('IVERNO71')
+        ]);
+        refresh([
+            entry('ILUMBY7'),
+            entry('ILUMBY8', {online: false}),
+            entry('IVERNO71', {online: false})
+        ]);
+
+        const tag = document.querySelector('.lapse-tag').textContent;
+        ok(tag.includes('ILUMBY8 and IVERNO71'), `named the missing pair, got: ${tag.trim()}`);
+
+        host.remove();
+    });
+
+    it('keeps the tiles themselves, so a reading has something to move in', () => {
+        // A tile that is thrown away cannot count to anything. These are the
+        // elements the readings are written into, and they have to survive a
+        // refresh for any of the movement above to be possible.
+        const host = build(three());
+
+        const view = host.querySelector('.view[data-view="ilumby7"]');
+        const arrow = view.querySelector('.wind-arrow');
+        const speed = view.querySelector('.wind-speed');
+        const readouts = view.querySelector('.readouts');
+        const readout = view.querySelector('.readout-value');
+        const tag = host.querySelector('.lapse-tag');
+
+        refresh(three());
+
+        ok(arrow === view.querySelector('.wind-arrow'), 'arrow kept');
+        ok(speed === view.querySelector('.wind-speed'), 'wind speed kept');
+        ok(readouts === view.querySelector('.readouts'), 'readouts kept');
+        ok(readout === view.querySelector('.readout-value'), 'each readout kept');
+        ok(tag === host.querySelector('.lapse-tag'), 'lapse tag kept');
 
         host.remove();
     });
@@ -123,7 +216,7 @@ describe('refreshing in place', () => {
         const chartHost = host.querySelector('.view[data-view="ilumby7"] .chart-host');
         const tab = host.querySelector('.tab[data-view="ilumby7"]');
 
-        index.updateInPlace(three());
+        refresh(three());
 
         // Identity, not equality: a replaced node would be a rebuilt page.
         ok(view === host.querySelector('.view[data-view="ilumby7"]'), 'panel kept');
@@ -140,7 +233,7 @@ describe('refreshing in place', () => {
         const menu = host.querySelector('.view[data-view="ilumby7"] .trend-menu');
         menu.hidden = false;
 
-        index.updateInPlace(three());
+        refresh(three());
 
         equal(host.querySelector('.view[data-view="ilumby7"] .trend-menu').hidden, false);
         host.remove();
@@ -152,7 +245,7 @@ describe('refreshing in place', () => {
         const veered = three();
         veered[0].observation = {...observations.ILUMBY7, winddir: 90, uk_hybrid: {...observations.ILUMBY7.uk_hybrid, windSpeed: 42.0}};
 
-        index.updateInPlace(veered);
+        refresh(veered);
 
         const view = host.querySelector('.view[data-view="ilumby7"]');
         equal(view.querySelector('.wind-cardinal').textContent, 'E');
@@ -169,7 +262,7 @@ describe('refreshing in place', () => {
         const colder = three();
         colder[2].observation = {...observations.IVERNO71, uk_hybrid: {...observations.IVERNO71.uk_hybrid, temp: -20}};
 
-        index.updateInPlace(colder);
+        refresh(colder);
 
         ok(host.querySelector('.lapse-figure').textContent !== before, 'the rate moved');
         host.remove();
@@ -180,7 +273,7 @@ describe('refreshing in place', () => {
         // practice — but the tab must still tell the truth if it is.
         const host = build(three());
 
-        index.updateInPlace([entry('ILUMBY7'), entry('ILUMBY8', {online: false}), entry('IVERNO71')]);
+        refresh([entry('ILUMBY7'), entry('ILUMBY8', {online: false}), entry('IVERNO71')]);
 
         equal(host.querySelector('.tab[data-view="ilumby8"] .tab-meta').textContent, 'offline');
         host.remove();
@@ -191,7 +284,7 @@ describe('refreshing in place', () => {
         const loaded = [entry('ILUMBY7'), entry('ILUMBY8', {online: false})];
         const host = build(loaded);
 
-        index.updateInPlace(loaded);
+        refresh(loaded);
 
         ok(!host.querySelector('.view[data-view="ilumby8"]'), 'still no panel');
         host.remove();

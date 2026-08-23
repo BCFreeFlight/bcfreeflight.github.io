@@ -1,6 +1,7 @@
 import {describe, it, equal, ok, fixture, freshenDay, withFetch, response} from './runner.js';
 import live from '../scripts/live.js';
 import sites from '../scripts/sites.js';
+import {settle} from '../scripts/lib/animate.js';
 
 /**
  * The overlay on the video.
@@ -80,6 +81,9 @@ async function draw(stub) {
 
     try {
         await withFetch(stub, () => live.loadAndDisplayWeatherOverlay());
+        // The tiles count to their readings over two seconds. What is checked
+        // here is where they land.
+        settle();
     } finally {
         // The overlay queues its next read in a `finally`, on a Loop shared by
         // the whole module. Left running, it fires a minute later against the
@@ -128,7 +132,12 @@ describe('the live overlay', () => {
 
         try {
             const icon = host.querySelector('#wind .weather-icon');
-            ok(icon.getAttribute('style').includes(`rotate(${238 + 180}deg)`));
+            const turned = Number(/rotate\((-?[\d.]+)deg\)/.exec(icon.style.transform)[1]);
+
+            // The bearing, not the number: the arrow turns the short way round
+            // from wherever it was pointing, so it lands on whichever angle
+            // means "from the WSW" is nearest — 58º here, not 418º.
+            equal(((turned % 360) + 360) % 360, (238 + 180) % 360);
         } finally {
             host.remove();
         }
