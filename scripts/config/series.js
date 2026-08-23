@@ -210,3 +210,51 @@ export const SKY_SERIES = [
  * @type {string[]}
  */
 export const LAPSE_COLOURS = colours('lapse-line-a', 'lapse-line-b', 'lapse-line-c');
+
+/**
+ * A five-minute bucket, read as a station reading.
+ *
+ * Every tile on the site used to come from `observations/current`: one instant
+ * per station, per request. It now comes from the newest bucket of the day the
+ * charts already read, so a single request serves both and a tile shows the
+ * five-minute aggregate rather than whatever the anemometer happened to catch.
+ * That is the trade, and it is made here rather than at each of the twenty
+ * places a field is read.
+ *
+ * The average is what a reading is; the gust is the peak, because an average
+ * gust is not a gust. Elevation is deliberately absent: a bucket does not carry
+ * one, and the site's own figure in sites.json is better than the one a
+ * station's owner typed into a registration form.
+ *
+ * @param {?Object} row - A bucket from observations/all/1day
+ * @returns {?Object} A station reading, or null when there is no bucket
+ */
+export function observationFrom(row) {
+    if (!row) return null;
+
+    const uk = row.uk_hybrid ?? {};
+
+    return {
+        stationID: row.stationID,
+        obsTimeUtc: row.obsTimeUtc,
+        obsTimeLocal: row.obsTimeLocal,
+        epoch: row.epoch,
+        lat: row.lat,
+        lon: row.lon,
+        winddir: row.winddirAvg,
+        humidity: row.humidityAvg,
+        uv: row.uvHigh,
+        solarRadiation: row.solarRadiationHigh,
+        uk_hybrid: {
+            temp: uk.tempAvg,
+            dewpt: uk.dewptAvg,
+            windSpeed: uk.windspeedAvg,
+            windGust: uk.windgustHigh,
+            heatIndex: uk.heatindexAvg,
+            windChill: uk.windchillAvg,
+            pressure: uk.pressureMax,
+            precipRate: uk.precipRate,
+            precipTotal: uk.precipTotal
+        }
+    };
+}

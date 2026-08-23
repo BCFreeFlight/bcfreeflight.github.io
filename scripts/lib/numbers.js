@@ -47,3 +47,12 @@ export function band(table, value) {
     return table.find(entry =>
         entry.min === undefined ? value <= entry.max : value >= entry.min) ?? null;
 }
+
+/**
+ * Feet, in metres.
+ *
+ * Weather Underground reports elevation in feet and the site configuration
+ * states it in metres, so the two meet here rather than in each of the places
+ * that has to cross between them.
+ */
+export const FEET = 0.3048;

@@ -1,4 +1,5 @@
 import {launchWindow} from './lib/launch.js';
+import {FEET} from './lib/numbers.js';
 import {
     DEFAULT_CACHE_SECONDS,
     MINIMUM_REFRESH_SECONDS,
@@ -14,6 +15,22 @@ import {
  */
 
 const CONFIG_URL = new URL('../sites/sites.json', import.meta.url);
+
+/**
+ * How high a station stands, in feet.
+ *
+ * From the site's own configuration, which states it in metres. The readings
+ * behind every tile are five-minute buckets, and a bucket does not carry an
+ * elevation at all — only the retired current-observation endpoint did, and the
+ * figure it carried was whatever the station's owner typed into a form.
+ *
+ * @param {?Object} station - A normalised station
+ * @returns {?number} Feet above sea level, or null when the site does not say
+ */
+export function elevationFeet(station) {
+    const metres = station?.coordinates?.elevation;
+    return Number.isFinite(metres) ? metres / FEET : null;
+}
 
 export class Sites {
     constructor() {

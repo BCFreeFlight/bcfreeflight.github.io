@@ -4,7 +4,7 @@ import {
     SUN_MARGIN_MS, WINDOW_STEP_MS, FORECAST_WINDOW
 } from './config/rasp.js';
 import {LAPSE} from './config/bands.js';
-import {band, isNumber} from './lib/numbers.js';
+import {band, isNumber, FEET} from './lib/numbers.js';
 import {lapseRate, MINIMUM_GAP} from './lib/lapse.js';
 import {binomial} from './lib/smooth.js';
 import {sunHeight, clearSky, shadeFraction, sunTimes} from './lib/solar.js';
@@ -26,8 +26,9 @@ import sounding from './sounding.js';
  * about pixels, and nothing in the renderer knows about lapse rates.
  */
 
-/** Weather Underground reports elevation in feet; the physics is all metric. */
-export const FEET = 0.3048;
+// Re-exported so the windgram and the trends panel keep taking it from here,
+// beside the physics that uses it, rather than reaching past into lib.
+export {FEET};
 
 // How finely the cloud and profile fields are sampled up the column. Fine
 // enough that a cloud band lands on the right side of a station, coarse enough

@@ -1,18 +1,22 @@
-import api from './wu-api.js';
+import history from './history.js';
 import * as bands from './config/bands.js';
 import {pointAt} from './config/compass.js';
-import {STORAGE_KEYS} from './config/defaults.js';
-import {readJson, writeJson} from './lib/storage.js';
+import {OBSERVATION_STALE_SECONDS} from './config/defaults.js';
 import {band, isNumber} from './lib/numbers.js';
 import {lapseRate} from './lib/lapse.js';
 
 /**
  * Reading the stations, and saying what the readings mean.
+ *
+ * A reading is the newest five-minute bucket of the station's own day — the
+ * same day the charts are drawn from, so one request serves both. Weather
+ * Underground also publishes a current-observation endpoint, one instant per
+ * request; the site no longer reads it, because an instant is whatever gust or
+ * lull happened to be passing and the bucket beside it is already averaged.
  */
 
 /**
  * @typedef {Object} UkHybrid
- * @property {number} elev - Elevation in feet
  * @property {number} windSpeed - Wind speed in km/h
  * @property {number} windGust - Wind gust in km/h
  * @property {number} temp - Temperature in Celsius
@@ -37,122 +41,113 @@ import {lapseRate} from './lib/lapse.js';
  */
 
 /**
- * A station's current reading, held for as long as it is worth holding.
+ * Clears the readings the retired current-observation endpoint left behind.
  *
- * The cache is aged off the observation's own timestamp rather than off when it
- * was fetched, so a station that has stopped updating is recognised as stale
- * instead of looking fresh every time it is re-read.
+ * Every reading used to be cached per station under `weather_cache_<id>`.
+ * Anyone who has visited the site still has those keys, in the same storage
+ * budget as the days that replaced them — and a day is the only thing the site
+ * now stores at size, so the space is worth taking back. Removable once a
+ * release has gone by.
+ *
+ * Bare `localStorage` access rather than `lib/storage.js` because it is the
+ * whole keyring being read, not one entry, which is also why it needs the
+ * `try`: enumerating storage throws outright in some privacy modes.
+ *
+ * @returns {void}
  */
-export class WeatherUnderground {
-    /**
-     * Retrieves weather data for the specified location, with optional caching support.
-     *
-     * @param {string} location - The location identifier for which to fetch the weather data.
-     * @param {number} [cacheTimeoutSeconds=0] - The time in seconds the data should be considered valid in the cache. Defaults to 0, which disables caching.
-     * @return {Promise<?Object>} A promise resolving to the weather data, or null.
-     */
-    async getWeather(location, cacheTimeoutSeconds = 0) {
-        const cacheKey = STORAGE_KEYS.observation(location);
-        const cached = readJson(cacheKey);
-        const observedAt = cached?.data?.observations?.[0]?.obsTimeUtc;
-
-        if (observedAt && cacheTimeoutSeconds > 0) {
-            const ageInSeconds = (Date.now() - Date.parse(observedAt)) / 1000;
-
-            if (ageInSeconds < cacheTimeoutSeconds) {
-                console.log(`Using cached weather data for ${location} (age: ${Math.round(ageInSeconds)}s, timeout: ${cacheTimeoutSeconds}s)`);
-                return cached.data;
-            }
-        }
-
-        const data = await this.fetchWeatherData(location);
-
-        if (data) writeJson(cacheKey, {data});
-
-        return data;
+export function forgetCachedObservations() {
+    try {
+        Object.keys(localStorage)
+            .filter(key => key.startsWith('weather_cache_'))
+            .forEach(key => localStorage.removeItem(key));
+    } catch (error) {
+        // Nothing here is worth an exception on a page that has readings to draw.
     }
+}
 
-    /**
-     * Reads a station, reporting a failure as no data rather than as an error:
-     * the page has a cached reading to fall back on and a placeholder to show.
-     * @param {string} location - The station identifier
-     * @return {Promise<?Object>} The weather data, or null
-     */
-    async fetchWeatherData(location) {
-        try {
-            return await api.current(location);
-        } catch (error) {
-            console.error("Error fetching weather data:", error);
-            return null;
-        }
-    }
+forgetCachedObservations();
+
+/**
+ * Whether a reading is recent enough to be showing.
+ *
+ * The buckets arrive every five minutes, so a station that has not published
+ * one in twenty minutes has stopped rather than being between readings. Asked
+ * of the reading itself rather than of the request that fetched it: a day still
+ * loads for a station that died at noon, and every bucket in it is real.
+ *
+ * @param {?Object} observation - A station reading
+ * @param {number} [now=Date.now()] - The moment to measure against
+ * @returns {boolean} Whether the station counts as still reporting
+ */
+export function isFresh(observation, now = Date.now()) {
+    const observedAt = Date.parse(observation?.obsTimeUtc ?? '');
+
+    if (Number.isNaN(observedAt)) return false;
+
+    return (now - observedAt) / 1000 < OBSERVATION_STALE_SECONDS;
 }
 
 /**
  * Main Weather class for handling weather data and calculations
  */
 export class Weather {
-    constructor() {
-        this.weatherUnderground = new WeatherUnderground();
-    }
-
     /**
      * Loads every station of a site.
      *
-     * Stations are fetched and interpreted independently, each with its own
-     * cache timeout, so one going dark never takes the others down with it.
-     * Each station keeps its configuration alongside its reading, which is what
-     * lets the pages stay free of hardcoded station ids.
+     * One request per station serves both the readings and the chart under
+     * them: the day is read here, the charts take the same cached day, and the
+     * readings are its newest bucket. Stations are read and interpreted
+     * independently, each with its own cache timeout, so one going dark never
+     * takes the others down with it. Each station keeps its configuration
+     * alongside its reading, which is what lets the pages stay free of
+     * hardcoded station ids.
+     *
+     * The day is kept on the entry even when the station has stopped
+     * reporting. Its readings are stale and every page hides them, but the
+     * hours it did record are still worth drawing — a station that quit at noon
+     * is exactly the one whose morning you want to see.
      *
      * @param {Object[]} stations - Normalised stations from the site configuration
-     * @return {Promise<Object[]>} One entry per station: station, observation, metrics, online
+     * @return {Promise<Object[]>} One entry per station: station, day, observation, metrics, online
      */
     async loadStations(stations) {
         return Promise.all(stations.map(async station => {
-            const data = await this.safeGetWeather(station.id, station.cacheSeconds);
-            const observation = this.firstObservation(data);
+            const day = await this.safeDay(station);
+            const observation = day?.latest ?? null;
 
             return {
                 station,
+                day,
                 observation,
-                metrics: this.describeObservation(observation),
-                online: Boolean(observation)
+                metrics: this.describeObservation(observation, station.coordinates?.elevation),
+                online: isFresh(observation)
             };
         }));
     }
 
     /**
-     * Fetches a station, resolving to null instead of rejecting so that one
-     * failing station cannot reject the whole page load
-     * @param {string} location - The station identifier
-     * @param {number} cacheTimeoutSeconds - Cache timeout for this station
-     * @returns {Promise<?Object>} The station data, or null
+     * Reads one station's day, resolving to null instead of rejecting so that
+     * one failing station cannot reject the whole page load.
+     * @param {Object} station - A normalised station
+     * @returns {Promise<?Object>} The day, or null
      */
-    async safeGetWeather(location, cacheTimeoutSeconds) {
+    async safeDay(station) {
         try {
-            return await this.weatherUnderground.getWeather(location, cacheTimeoutSeconds);
+            return await history.load(station.id, station.cacheSeconds);
         } catch (error) {
-            console.error(`Station ${location} failed to load:`, error);
+            console.error(`Station ${station.id} failed to load:`, error);
             return null;
         }
-    }
-
-    /**
-     * Pulls the current observation out of an API response, if there is one
-     * @param {?Object} stationData - Raw Weather Underground response
-     * @returns {?Object} The observation, or undefined when the station is dark
-     */
-    firstObservation(stationData) {
-        return stationData?.observations?.[0];
     }
 
     /**
      * Derives the interpreted metrics for a single observation. Each metric is
      * independent: a missing reading yields nulls for that metric alone.
      * @param {?Object} observation - A single station observation
+     * @param {?number} [elevationMetres=null] - Where the site says the station stands
      * @returns {Object} uvIndex, barometricPressure, dewPoint, humidity, heatIndex, windChill
      */
-    describeObservation(observation) {
+    describeObservation(observation, elevationMetres = null) {
         const empty = {
             uvIndex: null,
             barometricPressure: null,
@@ -169,7 +164,7 @@ export class Weather {
         const uk = observation.uk_hybrid ?? {};
 
         const seaLevelPressure = isNumber(uk.pressure)
-            ? this.computeSeaLevelPressure(uk.elev, uk.pressure)
+            ? this.computeSeaLevelPressure(elevationMetres ?? 0, uk.pressure)
             : null;
 
         return {
@@ -213,25 +208,31 @@ export class Weather {
     }
 
     /**
-     * Calculates the temperature lapse rate between two observations.
+     * Calculates the temperature lapse rate between two stations.
      *
-     * Which one is higher is decided by their reported elevation rather than by
-     * the order they arrive in, so callers can hand over any pair.
+     * Each side is a reading and the height it was taken at, because the reading
+     * does not carry one: a five-minute bucket states no elevation, so the
+     * height is the site's own figure from the configuration.
      *
-     * @param {?Object} a - One station's observation
-     * @param {?Object} b - The other station's observation
+     * Which one is higher is decided by that height rather than by the order
+     * they arrive in, so callers can hand over any pair.
+     *
+     * @param {?{observation: ?Object, elevationFeet: ?number}} a - One station
+     * @param {?{observation: ?Object, elevationFeet: ?number}} b - The other
      * @returns {Object} lapseRate, elevDiff and the matching stability band
      */
     calculateLapseRate(a, b) {
-        // Needs both stations. Keep the shape stable so callers can render a
-        // placeholder without null-checking every nested field.
-        if (!a?.uk_hybrid || !b?.uk_hybrid) {
+        // Needs a reading and a height on both sides. Keep the shape stable so
+        // callers can render a placeholder without null-checking every field.
+        if (!isNumber(a?.observation?.uk_hybrid?.temp) || !isNumber(b?.observation?.uk_hybrid?.temp)
+            || !Number.isFinite(a?.elevationFeet) || !Number.isFinite(b?.elevationFeet)) {
             return {lapseRate: null, elevDiff: null, details: null};
         }
 
-        const [upper, lower] = a.uk_hybrid.elev >= b.uk_hybrid.elev ? [a, b] : [b, a];
-        const elevDiffFeet = upper.uk_hybrid.elev - lower.uk_hybrid.elev;
-        const rate = lapseRate(lower.uk_hybrid.temp, upper.uk_hybrid.temp, elevDiffFeet / 1000);
+        const [upper, lower] = a.elevationFeet >= b.elevationFeet ? [a, b] : [b, a];
+        const elevDiffFeet = upper.elevationFeet - lower.elevationFeet;
+        const rate = lapseRate(lower.observation.uk_hybrid.temp, upper.observation.uk_hybrid.temp,
+            elevDiffFeet / 1000);
 
         return {
             lapseRate: rate.toFixed(2),
@@ -243,14 +244,14 @@ export class Weather {
     /**
      * Compute sea‐level equivalent pressure from station pressure and elevation.
      *
-     * @param {number} elevationFeet - Elevation in feet above sea level.
+     * Metres, because that is what the site configuration states and it is now
+     * the only place a station's height comes from.
+     *
+     * @param {number} elevationM - Elevation in metres above sea level.
      * @param {number} pressureHpa  - Measured pressure in hPa.
      * @returns {number} Sea‐level equivalent pressure in kPa.
      */
-    computeSeaLevelPressure(elevationFeet, pressureHpa) {
-        // Convert elevation to meters
-        const elevationM = elevationFeet * 0.3048;
-
+    computeSeaLevelPressure(elevationM, pressureHpa) {
         // Standard constants
         const T0 = 288.15;       // Sea‐level standard temperature (K)
         const L = 0.0065;        // Temperature lapse rate (K/m)

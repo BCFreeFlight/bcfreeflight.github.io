@@ -3,6 +3,7 @@ import sites from '../scripts/sites.js';
 import youtube from '../scripts/youtube.js';
 import home from '../scripts/home.js';
 import index from '../scripts/index.js';
+import {forgetCachedObservations} from '../scripts/weather.js';
 import {
     DEFAULT_CACHE_SECONDS,
     MINIMUM_REFRESH_SECONDS,
@@ -133,10 +134,21 @@ describe('the camera source', () => {
 });
 
 describe('storage keys', () => {
+    it('no longer names a cache the site does not keep', () => {
+        // Readings used to be cached per station under `weather_cache_<id>`,
+        // from the current-observation endpoint the site no longer reads.
+        equal(STORAGE_KEYS.observation, undefined);
+    });
+
+    it('clears what that cache left behind', () => {
+        localStorage.setItem('weather_cache_ILUMBY7', '{}');
+        forgetCachedObservations();
+        equal(localStorage.getItem('weather_cache_ILUMBY7'), null);
+    });
+
     it('keeps the names readers already have saved', () => {
         // Renaming any of these silently loses a reader's settings and their
         // cached readings.
-        equal(STORAGE_KEYS.observation('ILUMBY7'), 'weather_cache_ILUMBY7');
         equal(STORAGE_KEYS.day('ILUMBY7'), 'weather_history_ILUMBY7');
         equal(STORAGE_KEYS.liveView, 'live_view_mode');
         equal(STORAGE_KEYS.liveWeather, 'live_weather_visible');
@@ -192,7 +204,9 @@ describe('the front page', () => {
 describe('the weather page', () => {
     it('shows a station that is offline rather than hiding it', () => {
         const loaded = [
-            {station: {key: 'a', name: 'A'}, online: true, observation: {uk_hybrid: {elev: 1000}}},
+            // No observation at all: the height on the tab comes from the site's
+            // own configuration, not from anything the station reports.
+            {station: {key: 'a', name: 'A', coordinates: {elevation: 304.8}}, online: true},
             {station: {key: 'b', name: 'B'}, online: false}
         ];
 
@@ -213,7 +227,8 @@ describe('the weather page', () => {
 
     it('asks for two stations when only one is reporting', () => {
         const markup = index.renderLapseTag([
-            {station: {key: 'a', name: 'Alpha'}, online: true, observation: {uk_hybrid: {elev: 1000, temp: 10}}}
+            {station: {key: 'a', name: 'Alpha', coordinates: {elevation: 304.8}}, online: true,
+                observation: {uk_hybrid: {temp: 10}}}
         ]);
 
         ok(markup.includes('Needs two stations reporting'));

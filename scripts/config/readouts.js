@@ -68,7 +68,7 @@ export const READOUTS = [
     {
         label: 'UV Index',
         icon: 'light_mode',
-        read: observation => observation.uv,
+        read: observation => observation?.uv,
         note: (observation, metrics) => metrics.uvIndex
             ? `${metrics.uvIndex.risk} — ${metrics.uvIndex.description}`
             : null
@@ -93,7 +93,7 @@ export const READOUTS = [
         label: 'Solar Radiation',
         icon: 'brightness_7',
         unit: 'W/m²',
-        read: observation => observation.solarRadiation
+        read: observation => observation?.solarRadiation
     },
     {
         label: 'Rainfall',
