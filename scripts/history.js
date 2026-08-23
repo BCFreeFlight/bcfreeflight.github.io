@@ -1,5 +1,5 @@
 import api from './wu-api.js';
-import {SERIES} from './config/series.js';
+import {SERIES, observationFrom} from './config/series.js';
 import {HISTORY_CACHE_SECONDS, STORAGE_KEYS} from './config/defaults.js';
 import {readJson, writeJson} from './lib/storage.js';
 import {isNumber} from './lib/numbers.js';
@@ -20,15 +20,24 @@ import {isNumber} from './lib/numbers.js';
 export class History {
     /**
      * Today's readings for one station, from cache when it is fresh enough.
+     *
+     * How long a day is held is the station's own setting: the launch being
+     * watched comes back at the bucket cadence, and the reference stations that
+     * only feed the lapse rate are held for half an hour. Floored at the bucket
+     * cadence either way, because asking more often than the buckets arrive
+     * only re-reads the same hundred kilobytes of day.
+     *
      * @param {string} stationId - The Weather Underground station id
-     * @returns {Promise<?Object>} times, values and the day's bounds, or null
+     * @param {number} [cacheSeconds=HISTORY_CACHE_SECONDS] - The station's own timeout
+     * @returns {Promise<?Object>} times, values, latest and the day's bounds, or null
      */
-    async load(stationId) {
+    async load(stationId, cacheSeconds = HISTORY_CACHE_SECONDS) {
         const cacheKey = STORAGE_KEYS.day(stationId);
         const cached = readJson(cacheKey);
         const age = (Date.now() - (cached?.fetchedAt ?? 0)) / 1000;
+        const timeout = Math.max(cacheSeconds || 0, HISTORY_CACHE_SECONDS);
 
-        if (cached?.day && age < HISTORY_CACHE_SECONDS) {
+        if (cached?.day && age < timeout) {
             return cached.day;
         }
 
@@ -45,7 +54,7 @@ export class History {
     /**
      * Reads a station's day and trims it to the charted measurements.
      * @param {string} stationId - The Weather Underground station id
-     * @returns {Promise<?Object>} times, values, dayStart and dayEnd
+     * @returns {Promise<?Object>} times, values, latest, dayStart and dayEnd
      */
     async fetchDay(stationId) {
         let rows;
@@ -76,7 +85,12 @@ export class History {
             if (column.some(value => value !== null)) values[series.key] = column;
         }
 
-        return {times, values, ...this.dayBounds(rows[0])};
+        // The newest bucket, which is also every tile on the page. Picked by
+        // its own timestamp rather than by position: a page of readings is not
+        // worth betting on the order a response happened to arrive in.
+        const newest = rows.reduce((latest, row) => (row.epoch > latest.epoch ? row : latest), rows[0]);
+
+        return {times, values, latest: observationFrom(newest), ...this.dayBounds(rows[0])};
     }
 
     /**

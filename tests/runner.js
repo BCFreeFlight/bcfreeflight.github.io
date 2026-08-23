@@ -235,3 +235,37 @@ export async function fixture(name) {
     if (!response.ok) throw new Error(`Missing fixture ${name}`);
     return response.json();
 }
+
+/**
+ * A captured day, moved to now.
+ *
+ * The fixtures are real responses from a real August afternoon, which is what
+ * makes them worth having and also means every station in them has been silent
+ * for months. Anything that asks whether a station is still reporting has to
+ * shift them forward first.
+ *
+ * The whole day moves by one delta, so the buckets stay five minutes apart and
+ * the local clock still matches the epoch — `dayBounds` reads the offset
+ * between the two, and shifting only one of them lands the day on the wrong
+ * date entirely.
+ *
+ * @param {Object} day - A captured observations/all/1day response
+ * @param {number} [minutesAgo=1] - How old the newest bucket should be
+ * @returns {Object} A shifted copy; the fixture itself is left alone
+ */
+export function freshenDay(day, minutesAgo = 1) {
+    const rows = day.observations;
+    const newest = Math.max(...rows.map(row => row.epoch));
+    const shift = Math.round(Date.now() / 1000 - minutesAgo * 60) - newest;
+    const stamp = ms => new Date(ms).toISOString().replace('.000Z', 'Z');
+
+    return {
+        observations: rows.map(row => ({
+            ...row,
+            epoch: row.epoch + shift,
+            obsTimeUtc: stamp((row.epoch + shift) * 1000),
+            obsTimeLocal: stamp(Date.parse(`${row.obsTimeLocal.replace(' ', 'T')}Z`) + shift * 1000)
+                .replace('T', ' ').replace('Z', '')
+        }))
+    };
+}

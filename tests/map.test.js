@@ -2,6 +2,7 @@ import {describe, it, equal, ok, close, fixture} from './runner.js';
 import {mosaic, tileFor, TILE} from '../scripts/lib/tiles.js';
 import {MAP_FRAME, MAP_ZOOM, MAP_CREDIT, tileUrl} from '../scripts/config/map.js';
 import index from '../scripts/index.js';
+import {observationFrom} from '../scripts/config/series.js';
 
 /**
  * The satellite tile behind the wind direction.
@@ -17,7 +18,7 @@ import index from '../scripts/index.js';
  * against known values below.
  */
 
-const coopers = (await fixture('current-ILUMBY7')).observations[0];
+const coopers = observationFrom((await fixture('day-ILUMBY7')).observations.at(-1));
 
 /**
  * The frame a mosaic is built for, at the size the page uses.

@@ -1,14 +1,13 @@
 /**
  * Weather Underground's personal weather station API.
  *
- * Two endpoints are used: the current observation behind the tiles, and the
- * day's five-minute buckets behind the charts. They take the same key, the same
- * units and the same station id, and they were being assembled separately in
- * two files — which is exactly how a units change ends up applied to the tiles
- * and not to the chart under them.
+ * One endpoint is used: the day's five-minute buckets, which are both the chart
+ * and — in their newest bucket — every reading above it. There was a second,
+ * the current observation, until the readings moved onto the day; one request
+ * per station now serves both, and the two can no longer disagree.
  *
  * Errors are thrown rather than swallowed. Each caller has its own answer to a
- * station that will not answer — the tiles fall back to cached readings, the
+ * station that will not answer — the readings fall back to a cached day, the
  * chart draws nothing — and that decision does not belong down here.
  */
 
@@ -49,15 +48,6 @@ export class WeatherUndergroundApi {
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
         return response.json();
-    }
-
-    /**
-     * A station's latest observation.
-     * @param {string} stationId - The station id
-     * @returns {Promise<?Object>} The response, with its single observation
-     */
-    current(stationId) {
-        return this.read('observations/current', stationId);
     }
 
     /**

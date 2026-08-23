@@ -10,6 +10,7 @@ import {buildWindgram, sharedFrame, FEET} from './rasp.js';
 import {buildForecastWindgram} from './rasp-model.js';
 import {FORECAST_VIEW, DRAFT_CEILING} from './config/rasp.js';
 import forecast from './forecast.js';
+import {elevationFeet} from './sites.js';
 import {lapsePairs, lapseColumn} from './lapse-series.js';
 import {airColumn} from './air-series.js';
 import {sunTimes} from './lib/solar.js';
@@ -237,25 +238,20 @@ export class Trends {
     /**
      * How high a station stands, in feet.
      *
-     * From the site's own configuration where it is given. Weather Underground
-     * also reports an elevation, but it is whatever the station's owner typed
-     * in when they registered it, and the whole vertical geometry of the
-     * windgram is built on these numbers — where the slabs sit, which station
-     * the parcel is released from, how the model is anchored. That is not a
-     * thing to take from a form field if the site can state it.
+     * From the site's own configuration, which is the only place it is stated:
+     * the five-minute buckets behind every reading do not carry an elevation.
+     * The whole vertical geometry of the windgram is built on these numbers —
+     * where the slabs sit, which station the parcel is released from, how the
+     * model is anchored — so a stated height is the right source anyway.
      *
      * Feet because every height in the drawing is, so that the two scales down
      * the sides of the panel stay exact rather than round-tripped.
      *
-     * @param {Object} entry - A station entry with its observation
+     * @param {Object} entry - A station entry with its station configuration
      * @returns {number} Feet above sea level, or NaN when nothing says
      */
     elevationFeet(entry) {
-        const stated = entry.station.coordinates?.elevation;
-
-        if (Number.isFinite(stated)) return stated / FEET;
-
-        return Number(entry.observation?.uk_hybrid?.elev);
+        return elevationFeet(entry.station) ?? NaN;
     }
 
     /**
@@ -268,7 +264,7 @@ export class Trends {
         await Promise.all([
             ...panels.map(async panel => {
                 try {
-                    const day = await history.load(panel.station.id);
+                    const day = await history.load(panel.station.id, panel.station.cacheSeconds);
                     if (day) this.days.set(panel.station.key, day);
                 } catch (error) {
                     console.error(`Could not read the day for ${panel.station.id}:`, error);

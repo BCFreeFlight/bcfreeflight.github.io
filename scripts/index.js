@@ -1,7 +1,7 @@
 import time from './time.js';
 import weather from './weather.js';
 import air from './air.js';
-import sites from './sites.js';
+import sites, {elevationFeet} from './sites.js';
 import youtube from './youtube.js';
 import trends from './trends.js';
 import * as readings from './readings.js';
@@ -135,6 +135,22 @@ export class Index {
     }
 
     /**
+     * How high a station stands, as the tabs and the masthead say it.
+     *
+     * Rounded before it is written out: the configuration states metres and the
+     * conversion does not land on a whole foot, so an unrounded figure would
+     * read "3,465.879 ft ASL".
+     *
+     * @param {Object} station - A normalised station
+     * @returns {string} The label, or a stand-in when the site does not say
+     */
+    elevationLabel(station) {
+        const feet = elevationFeet(station);
+
+        return feet === null ? NO_READING : `${Math.round(feet).toLocaleString()} ft ASL`;
+    }
+
+    /**
      * The lapse-rate tag that rides on the tab bar. Lapse rate is measured
      * between the two stations, so it sits alongside the tabs rather than
      * inside one, and it reads the same whichever station is selected.
@@ -254,14 +270,20 @@ export class Index {
     renderStationView(entry) {
         const key = entry.station.key;
 
+        // A station that has stopped reporting keeps its tab and its chart, but
+        // not its readings: the last bucket it published is not what the air is
+        // doing now, and a number sitting on the page is read as current.
+        const observation = entry.online ? entry.observation : null;
+        const metrics = entry.online ? entry.metrics : weather.describeObservation(null);
+
         return `
             <div class="view" id="panel-${key}" role="tabpanel" tabindex="0"
                  aria-labelledby="tab-${key}" data-view="${key}" hidden>
                 ${this.renderWindRow(
-                    readings.wind(entry.observation, entry.station.launch),
-                    entry.observation,
+                    readings.wind(observation, entry.station.launch),
+                    observation,
                     entry.station.coordinates)}
-                ${this.renderReadouts(entry.observation, entry.metrics, entry.air)}
+                ${this.renderReadouts(observation, metrics, entry.air)}
                 ${trends.render(entry.station)}
             </div>`;
     }
@@ -303,7 +325,8 @@ export class Index {
      */
     signature(loaded) {
         return loaded
-            .map(entry => `${entry.station.key}:${entry.online ? 'on' : 'off'}`)
+            .map(entry =>
+                `${entry.station.key}:${entry.online ? 'on' : 'off'}:${entry.day ? 'day' : 'blank'}`)
             .join('|');
     }
 
@@ -332,7 +355,7 @@ export class Index {
             const meta = document.querySelector(`.tab[data-view="${key}"] .tab-meta`);
             if (meta) {
                 meta.textContent = entry.online
-                    ? `${Number(entry.observation.uk_hybrid.elev).toLocaleString()} ft ASL`
+                    ? this.elevationLabel(entry.station)
                     : 'offline';
             }
 
@@ -401,11 +424,11 @@ export class Index {
                         <button class="tab" type="button" role="tab" id="tab-${entry.station.key}"
                                 aria-controls="panel-${entry.station.key}" aria-selected="false"
                                 data-view="${entry.station.key}" tabindex="-1"
-                                ${entry.online ? '' : 'disabled'}>
+                                ${entry.day ? '' : 'disabled'}>
                             <span class="tab-name">${entry.station.name}</span>
                             <span class="tab-meta">${
                                 entry.online
-                                    ? `${Number(entry.observation.uk_hybrid.elev).toLocaleString()} ft ASL`
+                                    ? this.elevationLabel(entry.station)
                                     : 'offline'
                             }</span>
                         </button>`).join('')}
@@ -466,11 +489,10 @@ export class Index {
             return;
         }
 
-        const uk = source.observation.uk_hybrid ?? {};
         lastUpdatedElement.textContent = time.format(new Date(source.observation.obsTimeUtc));
         locationElement.innerHTML =
             `${source.observation.lat.toFixed(3)}, ${source.observation.lon.toFixed(3)}` +
-            `<span class="sep">@</span>${Number(uk.elev).toLocaleString()} ft ASL`;
+            `<span class="sep">@</span>${this.elevationLabel(source.station)}`;
     }
 
     /**
@@ -651,15 +673,22 @@ export class Index {
             // straight back from cache.
             await this.loadAir(loaded);
 
-            // Whichever stations answered. One being dark never hides the others.
+            // Whichever stations are still reporting. One being dark never hides
+            // the others.
             const enabled = loaded.filter(entry => entry.online);
 
-            if (!enabled.length) {
+            // Whichever stations have a day to draw, reporting or not. A station
+            // that stopped at noon is exactly the one whose morning is worth
+            // looking at, so it keeps its tab and its chart and loses only its
+            // readings.
+            const charted = loaded.filter(entry => entry.day);
+
+            if (!charted.length) {
                 lastUpdatedElement.textContent = 'no signal';
                 weatherDataContainer.innerHTML = `
                     <div class="state">
                         <p class="state-title">Every station is dark</p>
-                        <p>None of ${loaded.map(entry => entry.station.id).join(', ')} is reporting. Try
+                        <p>None of ${loaded.map(entry => entry.station.id).join(', ')} has logged anything today. Try
                            <a href="https://wunderground.com/dashboard/pws/${loaded[0].station.id}" target="_blank" rel="noopener">${loaded[0].station.name} on Weather Underground</a>.</p>
                     </div>`;
 
@@ -671,9 +700,11 @@ export class Index {
 
             const offline = loaded.filter(entry => !entry.online).map(entry => entry.station.name);
             const notice = offline.length
-                ? `<p class="notice">${offline.join(' and ')} ${offline.length > 1 ? 'are' : 'is'} offline. Showing the ${
-                    enabled.length > 1 ? 'remaining stations' : 'one station still reporting'
-                }.</p>`
+                ? `<p class="notice">${offline.join(' and ')} ${offline.length > 1 ? 'are' : 'is'} offline. ${
+                    enabled.length
+                        ? `Showing the ${enabled.length > 1 ? 'remaining stations' : 'one station still reporting'}.`
+                        : 'Showing the day each of them recorded.'
+                }</p>`
                 : '';
 
             const signature = this.signature(loaded);
@@ -694,16 +725,16 @@ export class Index {
                     weatherDataContainer.innerHTML =
                         notice +
                         this.renderTabs(loaded) +
-                        enabled.map(entry => this.renderStationView(entry)).join('');
+                        charted.map(entry => this.renderStationView(entry)).join('');
 
                     this.renderMasthead(loaded);
 
                     // Before the tabs, so the panel revealed by activateView
                     // already has a chart to size.
-                    trends.mount(enabled);
+                    trends.mount(charted);
 
-                    const lookup = Object.fromEntries(enabled.map(entry => [entry.station.key, entry]));
-                    this.bindTabs(enabled, lookup, selected);
+                    const lookup = Object.fromEntries(charted.map(entry => [entry.station.key, entry]));
+                    this.bindTabs(charted, lookup, selected);
                 });
 
                 if (hadFocus) {

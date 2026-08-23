@@ -3,6 +3,7 @@ import {pointAt} from './config/compass.js';
 import {facingLaunch} from './lib/launch.js';
 import {fixed, isNumber} from './lib/numbers.js';
 import {pairByElevation} from './lib/lapse.js';
+import {elevationFeet} from './sites.js';
 
 /**
  * Shared presentation of station readings.
@@ -111,12 +112,16 @@ export function precipitationRate(observation) {
  * @returns {Object[]} One segment per adjacent pair, each with its own wording
  */
 export function lapseSegments(loaded) {
-    const reporting = loaded.filter(entry =>
-        entry.online && entry.observation?.uk_hybrid?.elev !== undefined);
+    // The height comes from the configuration rather than from the reading: a
+    // five-minute bucket does not carry one, and a station whose height the
+    // site does not state cannot be placed in the stack at all.
+    const reporting = loaded
+        .map(entry => ({...entry, elevationFeet: elevationFeet(entry.station)}))
+        .filter(entry => entry.online && Number.isFinite(entry.elevationFeet));
 
-    return pairByElevation(reporting, entry => entry.observation.uk_hybrid.elev)
+    return pairByElevation(reporting, entry => entry.elevationFeet)
         .map(({upper, lower}) => ({
-            ...lapse(weather.calculateLapseRate(upper.observation, lower.observation)),
+            ...lapse(weather.calculateLapseRate(upper, lower)),
             // Short names here: a segment names two stations at once, and the
             // full pair would crowd both the tab bar and the video overlay.
             from: upper.station.shortName,

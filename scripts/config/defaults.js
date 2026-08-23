@@ -28,8 +28,16 @@ export const MINIMUM_REFRESH_SECONDS = 30;
 export const RETRY_MS = 60 * 1000;
 
 // The day's buckets arrive every five minutes, so asking more often than that
-// only re-reads the same day.
+// only re-reads the same day. A floor under each station's own cache timeout,
+// and the default for a caller that does not name one.
 export const HISTORY_CACHE_SECONDS = 5 * 60;
+
+// When a station counts as having stopped rather than as being between
+// readings. Four missed buckets: one late bucket is ordinary, twenty minutes of
+// silence is not. Until the readings moved onto the day there was no staleness
+// check at all — a station that went dark in the night kept its last reading on
+// the page all morning, correctly timestamped and entirely believed.
+export const OBSERVATION_STALE_SECONDS = 20 * 60;
 
 // Air quality is published hourly and moves slowly, so it is held far longer
 // than a station reading. Half an hour keeps a page that refreshes every minute
@@ -85,7 +93,6 @@ export const PLAYER_PARAMS = {
  * @type {Object}
  */
 export const STORAGE_KEYS = {
-    observation: id => `weather_cache_${id}`,
     day: id => `weather_history_${id}`,
     // Keyed by place rather than by station, because the air does not belong to
     // any one of them: two stations on the same hillside read the same square.

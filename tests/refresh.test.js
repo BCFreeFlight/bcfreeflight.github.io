@@ -2,6 +2,7 @@ import {describe, it, equal, ok, fixture} from './runner.js';
 import index from '../scripts/index.js';
 import trends from '../scripts/trends.js';
 import weather from '../scripts/weather.js';
+import {observationFrom} from '../scripts/config/series.js';
 
 /**
  * Refreshing without moving the page.
@@ -14,20 +15,38 @@ import weather from '../scripts/weather.js';
 
 const observations = {};
 for (const id of ['ILUMBY7', 'ILUMBY8', 'IVERNO71']) {
-    observations[id] = (await fixture(`current-${id}`)).observations[0];
+    observations[id] = observationFrom((await fixture(`day-${id}`)).observations.at(-1));
 }
+
+const METRES = {ILUMBY7: 1056.4, ILUMBY8: 495.0, IVERNO71: 1662.1};
+
+// A day, only as far as the page cares: something to hang a chart on.
+const A_DAY = {times: [1], values: {temp: [1]}, dayStart: 0, dayEnd: 1};
 
 /**
  * A station entry as `Weather.loadStations` would hand it over.
+ *
+ * `online` and `day` are separate on purpose. A station that has stopped
+ * reporting still has the hours it did record, and the page keeps its chart
+ * while dropping its readings.
+ *
  * @param {string} id - The station id
- * @param {Object} [options] - online, and an observation to override with
+ * @param {Object} [options] - online, day, and an observation to override with
  * @returns {Object} The entry
  */
-function entry(id, {online = true, observation = observations[id]} = {}) {
+function entry(id, {online = true, day = A_DAY, observation = observations[id]} = {}) {
+    const station = {
+        key: id.toLowerCase(), id, name: id, shortName: id, isDefault: id === 'ILUMBY7',
+        // The site's own height, in metres, as sites.json states it: the tabs
+        // and the lapse rate read it from here rather than from the reading.
+        coordinates: {elevation: METRES[id]}
+    };
+
     return {
-        station: {key: id.toLowerCase(), id, name: id, shortName: id, isDefault: id === 'ILUMBY7'},
+        station,
+        day,
         observation: online ? observation : undefined,
-        metrics: weather.describeObservation(online ? observation : undefined),
+        metrics: weather.describeObservation(online ? observation : undefined, METRES[id]),
         online
     };
 }
@@ -176,6 +195,46 @@ describe('refreshing in place', () => {
 
         ok(!host.querySelector('.view[data-view="ilumby8"]'), 'still no panel');
         host.remove();
+    });
+});
+
+describe('a station that has stopped reporting', () => {
+    it('keeps the day it did record', () => {
+        // The chart is the whole reason the tab stays: a station that quit at
+        // noon is exactly the one whose morning is worth looking at.
+        const stale = entry('ILUMBY7', {online: false});
+        const markup = index.renderStationView(stale);
+
+        ok(markup.includes('panel-ilumby7'), 'the panel is still drawn');
+        ok(markup.includes('trend'), 'and it still carries its chart');
+    });
+
+    it('shows no readings, rather than the last ones it published', () => {
+        // A number sitting on the page is read as current. The bucket behind it
+        // may be hours old, so it does not go up at all.
+        const markup = index.renderStationView(entry('ILUMBY7', {online: false}));
+
+        ok(!markup.includes('23.7'), 'not the temperature it last reported');
+        ok(!markup.includes('7.1'), 'nor the wind');
+        ok(markup.includes('—'), 'dashes instead');
+    });
+
+    it('is still reachable in the tab bar', () => {
+        const markup = index.renderTabs([entry('ILUMBY7', {online: false})]);
+
+        ok(markup.includes('offline'), 'and says why');
+        ok(!markup.includes('disabled'), 'but can still be opened for its chart');
+    });
+
+    it('is closed off only when there is nothing to draw either', () => {
+        const markup = index.renderTabs([entry('ILUMBY7', {online: false, day: null})]);
+        ok(markup.includes('disabled'));
+    });
+
+    it('rebuilds the page when a day arrives for a station that had none', () => {
+        const before = index.signature([entry('ILUMBY7', {day: null})]);
+        const after = index.signature([entry('ILUMBY7')]);
+        ok(before !== after, 'a chart appearing is a change of shape');
     });
 });
 

@@ -1,5 +1,5 @@
 import {describe, it, equal, ok, fixture} from './runner.js';
-import {SERIES, LAPSE_COLOURS} from '../scripts/config/series.js';
+import {SERIES, LAPSE_COLOURS, observationFrom} from '../scripts/config/series.js';
 import {READOUTS} from '../scripts/config/readouts.js';
 import {History} from '../scripts/history.js';
 import {Chart} from '../scripts/chart.js';
@@ -399,8 +399,8 @@ describe('lapse rate over the day', () => {
         const column = lapseColumn(pair, days.ILUMBY7.times).filter(v => v !== null);
         ok(column.length, 'there is a lapse line to compare');
 
-        const upper = {uk_hybrid: {elev: 5453, temp: days.IVERNO71.values.temp[0]}};
-        const lower = {uk_hybrid: {elev: 3466, temp: days.ILUMBY7.values.temp[0]}};
+        const upper = {elevationFeet: 5453, observation: {uk_hybrid: {temp: days.IVERNO71.values.temp[0]}}};
+        const lower = {elevationFeet: 3466, observation: {uk_hybrid: {temp: days.ILUMBY7.values.temp[0]}}};
         const tag = Number(weather.calculateLapseRate(upper, lower).lapseRate);
 
         ok(Math.abs(column[0] - tag) < 0.05, `chart ${column[0]} vs tag ${tag}`);
@@ -440,17 +440,17 @@ describe('the readouts configuration', () => {
     });
 
     it('reads a value out of a real observation', async () => {
-        const observation = (await fixture('current-ILUMBY7')).observations[0];
+        const observation = observationFrom((await fixture('day-ILUMBY7')).observations.at(-1));
         const metrics = weather.describeObservation(observation);
 
         const values = READOUTS.map(r => r.read(observation, metrics));
-        equal(values[0], '23.9', 'temperature leads');
+        equal(values[0], '23.7', 'temperature leads');
         equal(READOUTS.find(r => r.label === 'Humidity').read(observation, metrics), '35');
     });
 
     it('drops the unit when there is no reading to put it on', async () => {
         // "— kPa" reads as a measurement; "—" reads as a missing one.
-        const observation = (await fixture('current-ILUMBY7')).observations[0];
+        const observation = observationFrom((await fixture('day-ILUMBY7')).observations.at(-1));
         const metrics = weather.describeObservation(observation);
         const pressure = READOUTS.find(r => r.label === 'Barometric Pressure');
 
