@@ -157,6 +157,36 @@ describe('counting a reading to its new value', () => {
         ok(partway > 20.0 && partway < 21.0, `reached ${partway}, between the two`);
     });
 
+    it('never dips below the reading it is counting from', async () => {
+        // A frame carries the moment the browser began drawing it, and that can
+        // be *before* the clock the movement read when it started: the refresh
+        // landed in the middle of a frame that was already under way. Left
+        // unclamped that is a negative progress, and the easing turns it into a
+        // value below the one on the page — the tile flicks backwards for a
+        // frame before it sets off. Staged here by stamping every frame a
+        // hundred milliseconds early, because catching it by chance takes a
+        // machine busy enough to miss the frame it happens on.
+        const element = tile('20.0');
+        const real = window.requestAnimationFrame.bind(window);
+        const drawn = [];
+
+        window.requestAnimationFrame = callback => real(() => callback(performance.now() - 100));
+
+        try {
+            showValue(element, '21.0', {duration: 400});
+
+            for (let frame = 0; frame < 3; frame++) {
+                await new Promise(real);
+                drawn.push(Number(element.textContent));
+            }
+        } finally {
+            window.requestAnimationFrame = real;
+            stop(element);
+        }
+
+        ok(drawn.every(value => value >= 20.0), `drew ${JSON.stringify(drawn)}, none below 20.0`);
+    });
+
     it('lets go of a movement that is abandoned', async () => {
         // Whoever was waiting on it is waiting for a frame that will never be
         // drawn, so stopping settles it where it stands.
