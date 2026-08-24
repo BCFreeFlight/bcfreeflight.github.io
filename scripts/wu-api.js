@@ -9,6 +9,14 @@
  * Errors are thrown rather than swallowed. Each caller has its own answer to a
  * station that will not answer — the readings fall back to a cached day, the
  * chart draws nothing — and that decision does not belong down here.
+ *
+ * Nothing here is allowed to come out of the browser's own cache. Weather
+ * Underground answers this endpoint with `cache-control: max-age=822`, so a
+ * page that asked for a reading was handed the same fourteen-minute-old day
+ * again without a request ever leaving the machine. The site keeps its own
+ * cache, deliberately timed against the moment a reading goes stale, and a
+ * second invisible one underneath it is what made that timing a fiction: the
+ * day charted fine, and every station in it read as offline.
  */
 
 // The public key published with the station data. Not a secret: it is visible
@@ -40,7 +48,10 @@ export class WeatherUndergroundApi {
      * @throws {Error} When the station answers with a failure
      */
     async read(path, stationId) {
-        const response = await fetch(this.url(path, stationId));
+        // `no-store` rather than `reload`: there is nothing the browser could
+        // keep this for. Whether to ask at all is `History`'s decision, and it
+        // has already been made by the time anything gets here.
+        const response = await fetch(this.url(path, stationId), {cache: 'no-store'});
 
         // A station with nothing logged yet answers 204, which is an empty
         // reading rather than a failure.

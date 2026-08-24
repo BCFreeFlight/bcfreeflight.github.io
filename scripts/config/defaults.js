@@ -44,14 +44,25 @@ export const TILE_TRANSITION_MS = 2000;
 // the page all morning, correctly timestamped and entirely believed.
 export const OBSERVATION_STALE_SECONDS = 20 * 60;
 
+// A day is already behind when it arrives. Weather Underground publishes the
+// endpoint a bucket or so after the bucket it ends on, so a day fetched this
+// second carries a newest reading around five minutes old. Nothing here can
+// shorten that, but every timeout below has to leave room for it.
+export const PUBLICATION_LAG_SECONDS = 5 * 60;
+
 // The longest a day may be held before it is read again. A station judges its
 // own freshness from the newest bucket of the day in the cache, so a cache kept
 // longer than the staleness window makes the station declare itself offline
 // while the page is still refusing to refetch it: the reference stations were
 // held for thirty minutes, went stale at twenty, and the lapse rate they feed
-// blanked for the remaining ten out of every thirty. One bucket short of the
-// window, so the last cached day always has a live reading left in it.
-export const MAXIMUM_CACHE_SECONDS = OBSERVATION_STALE_SECONDS - HISTORY_CACHE_SECONDS;
+// blanked for the remaining ten out of every thirty.
+//
+// The room left for the lag is what makes this a margin rather than a
+// coincidence. At one bucket it came out at exactly twenty minutes — the cliff
+// itself — and a station spent the end of every cache window a few seconds
+// either side of being believed.
+export const MAXIMUM_CACHE_SECONDS =
+    OBSERVATION_STALE_SECONDS - HISTORY_CACHE_SECONDS - PUBLICATION_LAG_SECONDS;
 
 // Air quality is published hourly and moves slowly, so it is held far longer
 // than a station reading. Half an hour keeps a page that refreshes every minute

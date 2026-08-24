@@ -3,7 +3,10 @@ import api from '../scripts/wu-api.js';
 import {Weather} from '../scripts/weather.js';
 import {History} from '../scripts/history.js';
 import sites from '../scripts/sites.js';
-import {STORAGE_KEYS} from '../scripts/config/defaults.js';
+import {
+    HISTORY_CACHE_SECONDS, MAXIMUM_CACHE_SECONDS, OBSERVATION_STALE_SECONDS,
+    PUBLICATION_LAG_SECONDS, STORAGE_KEYS
+} from '../scripts/config/defaults.js';
 
 /**
  * What happens when the API does not cooperate.
@@ -233,6 +236,25 @@ describe('reading a day that will not load', () => {
         forget();
     });
 
+    it('never lets the browser answer for the station', async () => {
+        // Weather Underground answers this endpoint with a fourteen-minute
+        // max-age. Left to itself the browser served that back without a
+        // request leaving the machine, so a page that had waited out its own
+        // cache was handed the same stale day again — the charts drew, and
+        // every station on them read as offline.
+        forget();
+        let asked = null;
+
+        await withFetch((url, options) => {
+            asked = options;
+            return response({body: goodDay});
+        }, async () => {
+            await api.day('ILUMBY7');
+        });
+
+        equal(asked?.cache, 'no-store');
+    });
+
     it('re-reads a day held past the staleness window, whatever it asked for', async () => {
         forget();
         const history = new History();
@@ -255,15 +277,30 @@ describe('reading a day that will not load', () => {
         forget();
     });
 
+    it('leaves room for the lag between a bucket and its publication', () => {
+        // The three timings have to be read together or not at all. A day is
+        // already a bucket or so old when it arrives, and it is held on top of
+        // that: at a cap of exactly the staleness window less one bucket, the
+        // oldest reading a station could be judged on landed on twenty minutes
+        // to the second, which is the cliff rather than a margin.
+        ok(MAXIMUM_CACHE_SECONDS > 0, 'there is a window to cache in at all');
+        ok(MAXIMUM_CACHE_SECONDS >= HISTORY_CACHE_SECONDS,
+            'the cap cannot sit under the floor');
+        ok(MAXIMUM_CACHE_SECONDS + PUBLICATION_LAG_SECONDS < OBSERVATION_STALE_SECONDS,
+            'the oldest reading a cached day can carry is still believed');
+    });
+
     it('still holds a reference station well past the bucket cadence', async () => {
         forget();
         const history = new History();
 
-        // Ten minutes old: past the five-minute floor, inside the cap. The
-        // point of the cap is to bound a long timeout, not to collapse every
-        // station onto the bucket cadence.
+        // Past the bucket cadence it is floored at, and a minute inside the cap
+        // it is bounded by. The point of the cap is to bound a long timeout,
+        // not to collapse every station onto the bucket cadence — and taking
+        // the age from the cap itself means moving the cap cannot quietly turn
+        // this into a test of nothing.
         localStorage.setItem(STORAGE_KEYS.day('IVERNO71'), JSON.stringify({
-            fetchedAt: Date.now() - 10 * 60 * 1000,
+            fetchedAt: Date.now() - (MAXIMUM_CACHE_SECONDS - 60) * 1000,
             day: {times: [1], values: {temp: [1]}, dayStart: 0, dayEnd: 1}
         }));
 
